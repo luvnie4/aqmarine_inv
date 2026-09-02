@@ -7,26 +7,25 @@ import {
   Calendar, 
   Download, 
   Receipt, 
-  CreditCard, 
-  QrCode, 
-  Banknote, 
-  User, 
   Search,
   Eye,
-  ArrowUpRight,
   Store,
   Tent,
   MessageCircle,
   Tag,
-  Building2,
-  ShoppingBag,
   ChevronLeft,
   ChevronRight,
-  Filter
+  Filter,
+  Sparkles,
+  Layers,
+  MapPin,
+  CheckCircle2,
+  PieChart as PieChartIcon
 } from 'lucide-react';
-import { SaleTransaction, Product, SalesChannelType } from '../types';
-import { formatRupiah, formatNumber, formatDateTime, exportToCSV } from '../utils/formatters';
+import { SaleTransaction, Product } from '../types';
+import { formatRupiah, formatDateTime, exportToCSV } from '../utils/formatters';
 import { getOutlets } from '../utils/outletStorage';
+import { getBazaarEvents } from '../utils/bazaarStorage';
 
 interface ReportsViewProps {
   transactions: SaleTransaction[];
@@ -51,10 +50,37 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   
   const [searchTerm, setSearchTerm] = useState('');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
+  
+  // Channels: 'all' | 'toko' | 'bazaar' | 'whatsapp' | 'custom'
   const [channelFilter, setChannelFilter] = useState<string>('all');
-  const [outletFilter, setOutletFilter] = useState<string>('all');
+  const [selectedOutletId, setSelectedOutletId] = useState<string>('all');
+  const [selectedBazaarName, setSelectedBazaarName] = useState<string>('all');
+  
+  // Category Filter: 'all' | 'Hijab' | 'Mukena' | 'Lainnya'
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
   const outlets = useMemo(() => getOutlets(), []);
+  const bazaars = useMemo(() => getBazaarEvents(), []);
+
+  // Map product IDs to category for fast lookup
+  const productCategoryMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    products.forEach((p) => {
+      map[p.id] = p.category;
+    });
+    return map;
+  }, [products]);
+
+  // Helper to determine item category
+  const getItemCategory = (item: any): string => {
+    if (item.category) return item.category;
+    if (productCategoryMap[item.productId]) return productCategoryMap[item.productId];
+    const nameLower = (item.productName || '').toLowerCase();
+    const skuLower = (item.sku || '').toLowerCase();
+    if (nameLower.includes('mukena') || skuLower.includes('mkn')) return 'Mukena';
+    if (nameLower.includes('hijab') || nameLower.includes('pashmina') || nameLower.includes('voal') || skuLower.includes('hjb')) return 'Hijab';
+    return 'Lainnya';
+  };
 
   // Compute available years from transactions + current year
   const availableYears = useMemo(() => {
@@ -71,7 +97,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     return Array.from(yearsSet).sort((a, b) => b - a);
   }, [transactions, currentDate]);
 
-  // Navigate to previous month
+  // Navigate months
   const handlePrevMonth = () => {
     setTimeframe('monthly');
     if (selectedMonth === 1) {
@@ -82,7 +108,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     }
   };
 
-  // Navigate to next month
   const handleNextMonth = () => {
     setTimeframe('monthly');
     if (selectedMonth === 12) {
@@ -93,31 +118,26 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     }
   };
 
-  // Filter transactions based on date, month/year, channel, payment, & search
-  const filteredTransactions = useMemo(() => {
+  // Base Timeframe Filtered Transactions (before channel/category filters)
+  const baseTimeframeTransactions = useMemo(() => {
     const now = new Date();
     const todayDate = now.toISOString().slice(0, 10);
-    
-    // Calculate last 7 days boundary
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const thisMonthPrefix = now.toISOString().slice(0, 7); // YYYY-MM
+    const thisMonthPrefix = now.toISOString().slice(0, 7);
     const selectedMonthlyPrefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
 
     return transactions.filter((tx) => {
-      // Date filter
-      if (timeframe === 'today' && !tx.date.startsWith(todayDate)) {
-        return false;
-      }
-      if (timeframe === 'last7' && new Date(tx.date) < sevenDaysAgo) {
-        return false;
-      }
-      if (timeframe === 'this_month' && !tx.date.startsWith(thisMonthPrefix)) {
-        return false;
-      }
-      if (timeframe === 'monthly' && !tx.date.startsWith(selectedMonthlyPrefix)) {
-        return false;
-      }
+      if (timeframe === 'today' && !tx.date.startsWith(todayDate)) return false;
+      if (timeframe === 'last7' && new Date(tx.date) < sevenDaysAgo) return false;
+      if (timeframe === 'this_month' && !tx.date.startsWith(thisMonthPrefix)) return false;
+      if (timeframe === 'monthly' && !tx.date.startsWith(selectedMonthlyPrefix)) return false;
+      return true;
+    });
+  }, [transactions, timeframe, selectedMonth, selectedYear]);
 
+  // Filter transactions based on date, channel, specific outlet/bazaar, category, payment & search
+  const filteredTransactions = useMemo(() => {
+    return baseTimeframeTransactions.filter((tx) => {
       // Payment filter
       if (paymentFilter !== 'all' && tx.paymentMethod !== paymentFilter) {
         return false;
@@ -125,132 +145,189 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       // Channel filter
       if (channelFilter !== 'all') {
-        if (tx.salesChannelType !== channelFilter) {
+        const type = tx.salesChannelType || 'toko';
+        if (type !== channelFilter) {
           return false;
         }
       }
 
-      // Outlet filter
-      if (outletFilter !== 'all') {
-        if (tx.outletId !== outletFilter) {
+      // Specific Outlet filter (if Toko Offline is selected or in all channels)
+      if (selectedOutletId !== 'all') {
+        if (tx.outletId !== selectedOutletId) {
+          return false;
+        }
+      }
+
+      // Specific Bazaar filter (if Bazaar is selected)
+      if (selectedBazaarName !== 'all') {
+        if (!tx.bazaarName || !tx.bazaarName.toLowerCase().includes(selectedBazaarName.toLowerCase())) {
+          return false;
+        }
+      }
+
+      // Category filter (Hijab vs Mukena vs Lainnya)
+      if (categoryFilter !== 'all') {
+        const hasCategoryItem = tx.items.some((item) => {
+          const cat = getItemCategory(item);
+          return cat.toLowerCase() === categoryFilter.toLowerCase();
+        });
+        if (!hasCategoryItem) {
           return false;
         }
       }
 
       // Search query
       const query = searchTerm.toLowerCase();
+      if (!query) return true;
+
       const matchSearch =
         tx.transactionNumber.toLowerCase().includes(query) ||
-        tx.customerName.toLowerCase().includes(query) ||
-        tx.cashier.toLowerCase().includes(query) ||
+        (tx.customerName && tx.customerName.toLowerCase().includes(query)) ||
+        (tx.cashier && tx.cashier.toLowerCase().includes(query)) ||
         (tx.bazaarName && tx.bazaarName.toLowerCase().includes(query)) ||
         (tx.outletName && tx.outletName.toLowerCase().includes(query)) ||
         (tx.salesChannelName && tx.salesChannelName.toLowerCase().includes(query)) ||
-        tx.items.some((i) => i.productName.toLowerCase().includes(query) || i.sku.toLowerCase().includes(query));
+        tx.items.some((i) => i.productName?.toLowerCase().includes(query) || i.sku?.toLowerCase().includes(query));
 
       return matchSearch;
     });
-  }, [transactions, timeframe, selectedMonth, selectedYear, paymentFilter, channelFilter, outletFilter, searchTerm]);
+  }, [baseTimeframeTransactions, paymentFilter, channelFilter, selectedOutletId, selectedBazaarName, categoryFilter, searchTerm, productCategoryMap]);
 
-  // Aggregate Metrics
-  const totalOmset = filteredTransactions.reduce((sum, tx) => sum + tx.total, 0);
+  // Aggregate Metrics for Current Filtered List
+  const totalOmset = filteredTransactions.reduce((sum, tx) => sum + (tx.total || 0), 0);
   
   const totalHpp = filteredTransactions.reduce((sum, tx) => {
-    return sum + tx.items.reduce((iSum, item) => iSum + (item.hpp * item.quantity), 0);
+    return sum + tx.items.reduce((iSum, item) => iSum + ((item.hpp || 0) * (item.quantity || 1)), 0);
   }, 0);
 
   const totalProfit = totalOmset - totalHpp;
   const profitMargin = totalOmset > 0 ? (totalProfit / totalOmset) * 100 : 0;
   
   const totalItemsSold = filteredTransactions.reduce((sum, tx) => {
-    return sum + tx.items.reduce((iSum, item) => iSum + item.quantity, 0);
+    return sum + tx.items.reduce((iSum, item) => iSum + (item.quantity || 1), 0);
   }, 0);
 
   const avgBasketSize = filteredTransactions.length > 0 ? totalOmset / filteredTransactions.length : 0;
 
-  // Channel Breakdown
+  // Global Channel Breakdown across the active timeframe (for comparison cards)
   const channelBreakdown = useMemo(() => {
     const map = {
-      toko: { count: 0, total: 0, label: 'Toko Offline' },
-      bazaar: { count: 0, total: 0, label: 'Bazaar / Event' },
-      whatsapp: { count: 0, total: 0, label: 'WhatsApp / Online' },
-      custom: { count: 0, total: 0, label: 'Saluran Kustom' },
+      toko: { count: 0, total: 0, items: 0, label: 'Toko Offline' },
+      bazaar: { count: 0, total: 0, items: 0, label: 'Bazaar & Event' },
+      whatsapp: { count: 0, total: 0, items: 0, label: 'WhatsApp / Online' },
+      custom: { count: 0, total: 0, items: 0, label: 'Saluran Lainnya' },
     };
 
-    filteredTransactions.forEach((tx) => {
-      const type = tx.salesChannelType || 'toko';
+    baseTimeframeTransactions.forEach((tx) => {
+      const type = (tx.salesChannelType as keyof typeof map) || 'toko';
       if (map[type]) {
         map[type].count += 1;
-        map[type].total += tx.total;
+        map[type].total += (tx.total || 0);
+        map[type].items += tx.items.reduce((s, i) => s + (i.quantity || 1), 0);
       }
     });
 
     return map;
-  }, [filteredTransactions]);
+  }, [baseTimeframeTransactions]);
 
-  // Daily Breakdown inside Selected Month for Monthly Recap
-  const dailyBreakdown = useMemo(() => {
-    if (timeframe !== 'monthly' && timeframe !== 'this_month') return [];
-    
-    const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
-    const dayMap: Record<number, { day: number; count: number; total: number; profit: number; items: number }> = {};
-    
-    for (let d = 1; d <= daysInMonth; d++) {
-      dayMap[d] = { day: d, count: 0, total: 0, profit: 0, items: 0 };
-    }
+  // Global Category Breakdown across active timeframe (Hijab vs Mukena vs Others)
+  const categoryBreakdown = useMemo(() => {
+    let hijabOmset = 0;
+    let hijabQty = 0;
+    let hijabHpp = 0;
+    let hijabTxCount = 0;
 
-    filteredTransactions.forEach((tx) => {
-      const txDate = new Date(tx.date);
-      const day = txDate.getDate();
-      if (dayMap[day]) {
-        const txHpp = tx.items.reduce((s, i) => s + (i.hpp * i.quantity), 0);
-        dayMap[day].count += 1;
-        dayMap[day].total += tx.total;
-        dayMap[day].profit += (tx.total - txHpp);
-        dayMap[day].items += tx.items.reduce((s, i) => s + i.quantity, 0);
-      }
-    });
+    let mukenaOmset = 0;
+    let mukenaQty = 0;
+    let mukenaHpp = 0;
+    let mukenaTxCount = 0;
 
-    return Object.values(dayMap).filter((d) => d.count > 0);
-  }, [filteredTransactions, timeframe, selectedMonth, selectedYear]);
+    let othersOmset = 0;
+    let othersQty = 0;
+    let othersHpp = 0;
 
-  // Top Selling Products in the selected period
-  const topProducts = useMemo(() => {
-    const map: Record<string, { id: string; name: string; sku: string; category: string; qty: number; revenue: number }> = {};
+    baseTimeframeTransactions.forEach((tx) => {
+      let hasHijabInTx = false;
+      let hasMukenaInTx = false;
 
-    filteredTransactions.forEach((tx) => {
       tx.items.forEach((item) => {
-        if (!map[item.productId]) {
-          map[item.productId] = {
-            id: item.productId,
-            name: item.productName,
-            sku: item.sku,
-            category: item.category,
-            qty: 0,
-            revenue: 0,
-          };
+        const cat = getItemCategory(item);
+        const subtotal = item.subtotal || ((item.price || 0) * (item.quantity || 1));
+        const hppTotal = (item.hpp || 0) * (item.quantity || 1);
+        const qty = item.quantity || 1;
+
+        if (cat.toLowerCase() === 'hijab') {
+          hijabOmset += subtotal;
+          hijabQty += qty;
+          hijabHpp += hppTotal;
+          hasHijabInTx = true;
+        } else if (cat.toLowerCase() === 'mukena') {
+          mukenaOmset += subtotal;
+          mukenaQty += qty;
+          mukenaHpp += hppTotal;
+          hasMukenaInTx = true;
+        } else {
+          othersOmset += subtotal;
+          othersQty += qty;
+          othersHpp += hppTotal;
         }
-        map[item.productId].qty += item.quantity;
-        map[item.productId].revenue += item.subtotal;
       });
+
+      if (hasHijabInTx) hijabTxCount += 1;
+      if (hasMukenaInTx) mukenaTxCount += 1;
     });
 
-    return Object.values(map).sort((a, b) => b.qty - a.qty).slice(0, 5);
-  }, [filteredTransactions]);
+    const hijabProfit = hijabOmset - hijabHpp;
+    const mukenaProfit = mukenaOmset - mukenaHpp;
+    const othersProfit = othersOmset - othersHpp;
 
-  // Export Sales Report to CSV
+    return {
+      hijab: {
+        omset: hijabOmset,
+        qty: hijabQty,
+        profit: hijabProfit,
+        margin: hijabOmset > 0 ? (hijabProfit / hijabOmset) * 100 : 0,
+        txCount: hijabTxCount,
+      },
+      mukena: {
+        omset: mukenaOmset,
+        qty: mukenaQty,
+        profit: mukenaProfit,
+        margin: mukenaOmset > 0 ? (mukenaProfit / mukenaOmset) * 100 : 0,
+        txCount: mukenaTxCount,
+      },
+      others: {
+        omset: othersOmset,
+        qty: othersQty,
+        profit: othersProfit,
+        margin: othersOmset > 0 ? (othersProfit / othersOmset) * 100 : 0,
+      }
+    };
+  }, [baseTimeframeTransactions, productCategoryMap]);
+
+  // Unique list of active bazaar names from transactions + stored bazaars
+  const availableBazaarNames = useMemo(() => {
+    const set = new Set<string>();
+    bazaars.forEach(b => { if (b.name) set.add(b.name); });
+    transactions.forEach(tx => { if (tx.bazaarName) set.add(tx.bazaarName); });
+    return Array.from(set).filter(Boolean);
+  }, [bazaars, transactions]);
+
+  // Export Sales Report to CSV with Channel & Category insights
   const handleExportCSV = () => {
     const headers = [
       'No Transaksi',
       'Tanggal',
       'Saluran Penjualan',
-      'Toko / Cabang',
-      'Nama Bazaar / Event',
+      'Detail Outlet / Event',
+      'Kategori Produk',
+      'Item Hijab (pcs)',
+      'Item Mukena (pcs)',
+      'Rincian Produk',
       'Pelanggan',
       'No WA',
       'Kasir',
       'Metode Bayar',
-      'Jumlah Item',
       'Subtotal',
       'Diskon',
       'Total Akhir',
@@ -258,29 +335,62 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     ];
 
     const rows = filteredTransactions.map((tx) => {
-      const txHpp = tx.items.reduce((s, i) => s + (i.hpp * i.quantity), 0);
-      const txProfit = tx.total - txHpp;
+      const txHpp = tx.items.reduce((s, i) => s + ((i.hpp || 0) * (i.quantity || 1)), 0);
+      const txProfit = (tx.total || 0) - txHpp;
+      
+      let hijabCount = 0;
+      let mukenaCount = 0;
+      const categoriesFound: string[] = [];
+
+      tx.items.forEach((item) => {
+        const cat = getItemCategory(item);
+        if (!categoriesFound.includes(cat)) categoriesFound.push(cat);
+        if (cat.toLowerCase() === 'hijab') hijabCount += (item.quantity || 1);
+        if (cat.toLowerCase() === 'mukena') mukenaCount += (item.quantity || 1);
+      });
+
+      const channelType = tx.salesChannelType || 'toko';
+      const channelLabel = 
+        channelType === 'toko' ? 'Toko Offline' :
+        channelType === 'bazaar' ? 'Bazaar & Event' :
+        channelType === 'whatsapp' ? 'WhatsApp' : 'Saluran Lainnya';
+
+      const locationLabel = 
+        channelType === 'toko' ? (tx.outletName || 'Toko Utama') :
+        channelType === 'bazaar' ? (tx.bazaarName || 'Event Bazaar') :
+        channelType === 'whatsapp' ? 'Online WA' : (tx.customChannelName || '-');
+
+      const itemsDetail = tx.items.map(i => `${i.productName} (${i.quantity || 1} pcs)`).join('; ');
+
       return [
         tx.transactionNumber,
         tx.date,
-        tx.salesChannelName || (tx.salesChannelType === 'bazaar' ? 'Bazaar' : 'Toko Offline'),
-        tx.outletName || '-',
-        tx.bazaarName || '-',
-        tx.customerName,
+        channelLabel,
+        locationLabel,
+        categoriesFound.join(', '),
+        hijabCount,
+        mukenaCount,
+        itemsDetail,
+        tx.customerName || 'Pelanggan Umum',
         tx.customerPhone || '-',
-        tx.cashier,
+        tx.cashier || 'Admin',
         tx.paymentMethod,
-        tx.items.reduce((s, i) => s + i.quantity, 0),
         tx.subtotal,
-        tx.discount,
+        tx.discount || 0,
         tx.total,
         txProfit
       ];
     });
 
-    let filename = `Laporan_Penjualan_AQMARINE_${timeframe}`;
+    let filename = `Laporan_Transaksi_${timeframe}`;
     if (timeframe === 'monthly') {
-      filename = `Laporan_Penjualan_AQMARINE_${MONTH_NAMES[selectedMonth - 1]}_${selectedYear}`;
+      filename = `Laporan_Transaksi_${MONTH_NAMES[selectedMonth - 1]}_${selectedYear}`;
+    }
+    if (channelFilter !== 'all') {
+      filename += `_${channelFilter}`;
+    }
+    if (categoryFilter !== 'all') {
+      filename += `_${categoryFilter}`;
     }
 
     exportToCSV(filename, headers, rows);
@@ -290,32 +400,32 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const type = tx.salesChannelType || 'toko';
     if (type === 'bazaar') {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
-          <Tent className="w-3 h-3 text-amber-700" />
-          {tx.bazaarName || 'Bazaar'}
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-amber-100/90 text-amber-900 border border-amber-300/80 shadow-2xs">
+          <Tent className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+          <span className="truncate max-w-[140px]">{tx.bazaarName || 'Bazaar'}</span>
         </span>
       );
     }
     if (type === 'whatsapp') {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-900 border border-green-200">
-          <MessageCircle className="w-3 h-3 text-green-700" />
-          WhatsApp
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-green-100/90 text-green-900 border border-green-300/80 shadow-2xs">
+          <MessageCircle className="w-3.5 h-3.5 text-green-700 shrink-0" />
+          <span>WhatsApp / Online</span>
         </span>
       );
     }
     if (type === 'custom') {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-200">
-          <Tag className="w-3 h-3 text-[#9D6C72]" />
-          {tx.customChannelName || 'Kustom'}
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-rose-100/90 text-rose-900 border border-rose-300/80 shadow-2xs">
+          <Tag className="w-3.5 h-3.5 text-[#9D6C72] shrink-0" />
+          <span className="truncate max-w-[140px]">{tx.customChannelName || 'Kustom'}</span>
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-200">
-        <Store className="w-3 h-3 text-emerald-700" />
-        {tx.outletName || 'Toko Offline'}
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-emerald-100/90 text-emerald-950 border border-emerald-300/80 shadow-2xs">
+        <Store className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+        <span className="truncate max-w-[140px]">{tx.outletName || 'Toko Offline'}</span>
       </span>
     );
   };
@@ -324,17 +434,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     selectedMonth === (currentDate.getMonth() + 1) && 
     selectedYear === currentDate.getFullYear();
 
+  // Calculate grand total omset of active timeframe
+  const grandTimeframeOmset = baseTimeframeTransactions.reduce((s, tx) => s + (tx.total || 0), 0);
+
   return (
-    <div className="space-y-6 pb-16">
+    <div className="space-y-6 pb-20">
       
       {/* Header & Export Action */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">
-            Laporan Penjualan & Keuangan
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight">
+              Laporan Penjualan & Transaksi
+            </h1>
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#9D6C72]/10 text-[#9D6C72] border border-[#9D6C72]/20">
+              Multi-Channel & Kategori
+            </span>
+          </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Analisis omset, laba kotor, dan rekapitulasi penjualan bulanan per saluran.
+            Rekap transaksi berdasarkan Toko Offline, Bazaar, WhatsApp, serta kategori produk Hijab dan Mukena.
           </p>
         </div>
 
@@ -407,7 +525,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
             <div>
               <span className="text-[10px] uppercase tracking-wider font-bold text-[#9D6C72]">
-                Periode Rekapitulasi Bulanan
+                Periode Rekapitulasi Penjualan
               </span>
               <div className="text-base sm:text-lg font-black text-slate-800 flex items-center gap-2">
                 <span>{MONTH_NAMES[selectedMonth - 1]} {selectedYear}</span>
@@ -420,9 +538,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          {/* Month & Year Selectors & Fast Month Jump Controls */}
+          {/* Month & Year Selectors & Controls */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Quick Prev Month */}
             <button
               onClick={handlePrevMonth}
               className="p-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs active:scale-95 transition-all"
@@ -431,7 +548,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <ChevronLeft className="w-4 h-4" />
             </button>
 
-            {/* Month Dropdown */}
             <select
               value={selectedMonth}
               onChange={(e) => {
@@ -447,7 +563,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               ))}
             </select>
 
-            {/* Year Dropdown */}
             <select
               value={selectedYear}
               onChange={(e) => {
@@ -463,7 +578,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               ))}
             </select>
 
-            {/* Quick Next Month */}
             <button
               onClick={handleNextMonth}
               className="p-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs active:scale-95 transition-all"
@@ -472,7 +586,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <ChevronRight className="w-4 h-4" />
             </button>
 
-            {/* Reset to Today / Current Month if looking at other month */}
             {!isCurrentMonthSelected && (
               <button
                 onClick={() => {
@@ -489,13 +602,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       )}
 
-      {/* 4 Core Financial Summary Cards */}
+      {/* ========================================================================= */}
+      {/* 1. FINANCIAL SUMMARY OVERVIEW */}
+      {/* ========================================================================= */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         {/* Total Omset */}
-        <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-2">
+        <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-2 relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500">Total Omset Penjualan</span>
+            <span className="text-xs font-bold text-slate-500">
+              Total Omset ({channelFilter === 'all' ? 'Semua Saluran' : channelFilter.toUpperCase()})
+            </span>
             <div className="p-2 rounded-2xl bg-rose-50 text-[#9D6C72]">
               <DollarSign className="w-5 h-5" />
             </div>
@@ -503,15 +620,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           <div className="text-2xl font-black text-slate-900 tracking-tight">
             {formatRupiah(totalOmset)}
           </div>
-          <div className="text-xs text-slate-500 font-medium">
-            Dari <strong>{filteredTransactions.length}</strong> total transaksi
+          <div className="text-xs text-slate-500 font-medium flex items-center gap-1.5">
+            <span>Dari <strong>{filteredTransactions.length}</strong> transaksi</span>
+            {categoryFilter !== 'all' && (
+              <span className="px-1.5 py-0.2 bg-rose-100 text-rose-800 rounded font-bold text-[10px]">
+                Filter {categoryFilter}
+              </span>
+            )}
           </div>
         </div>
 
         {/* Laba Kotor */}
         <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500">Estimasi Laba Kotor (Gross)</span>
+            <span className="text-xs font-bold text-slate-500">Estimasi Laba Kotor</span>
             <div className="p-2 rounded-2xl bg-emerald-50 text-emerald-600">
               <TrendingUp className="w-5 h-5" />
             </div>
@@ -536,7 +658,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             {totalItemsSold} <span className="text-sm font-bold text-slate-500">pcs</span>
           </div>
           <div className="text-xs text-slate-500 font-medium">
-            Hijab & Mukena terdistribusi
+            Hijab, Mukena & Produk Lain
           </div>
         </div>
 
@@ -544,7 +666,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500">Rata-rata Keranjang (AOV)</span>
-            <div className="p-2 rounded-2xl bg-slate-50 text-slate-700">
+            <div className="p-2 rounded-2xl bg-indigo-50 text-indigo-600">
               <BarChart3 className="w-5 h-5" />
             </div>
           </div>
@@ -552,105 +674,182 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             {formatRupiah(avgBasketSize)}
           </div>
           <div className="text-xs text-slate-500 font-medium">
-            Nilai transaksi rata-rata
+            Nilai rata-rata per transaksi
           </div>
         </div>
 
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. SALES CHANNEL BREAKDOWN METRICS */}
+      {/* 2. DAFTAR SALURAN (TOKO OFFLINE, BAZAAR, WHATSAPP) - INTERACTIVE CARDS */}
       {/* ========================================================================= */}
       <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm space-y-4">
-        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <div className="p-1.5 rounded-xl bg-rose-50 text-[#9D6C72]">
-              <Tag className="w-4 h-4" />
+              <Store className="w-4 h-4" />
             </div>
-            <h2 className="text-sm font-bold text-slate-800">
-              Performa Omset per Kategori Saluran Penjualan
-            </h2>
+            <div>
+              <h2 className="text-sm font-bold text-slate-800">
+                1. Performa Berdasarkan Saluran Penjualan
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                Klik kartu saluran untuk langsung menyaring daftar transaksi di bawah
+              </p>
+            </div>
           </div>
-          <span className="text-xs text-slate-500 font-medium">
-            Toko Offline • Bazaar • WhatsApp • Kustom
-          </span>
+
+          {channelFilter !== 'all' && (
+            <button
+              onClick={() => {
+                setChannelFilter('all');
+                setSelectedOutletId('all');
+                setSelectedBazaarName('all');
+              }}
+              className="text-xs font-bold text-[#9D6C72] hover:underline self-start sm:self-auto"
+            >
+              Tampilkan Semua Saluran
+            </button>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
           
-          {/* Toko Offline */}
-          <div className="p-4 rounded-2xl bg-emerald-50/50 border border-emerald-200/80 space-y-1.5">
+          {/* Toko Offline Card */}
+          <div 
+            onClick={() => {
+              setChannelFilter(channelFilter === 'toko' ? 'all' : 'toko');
+              setSelectedBazaarName('all');
+            }}
+            className={`p-4 rounded-2xl border transition-all cursor-pointer select-none relative ${
+              channelFilter === 'toko'
+                ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/30 shadow-sm'
+                : 'bg-emerald-50/40 border-emerald-200 hover:bg-emerald-50/80 hover:border-emerald-300'
+            }`}
+          >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+              <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
                 <Store className="w-4 h-4 text-emerald-600" />
                 Toko Offline
               </span>
-              <span className="text-[11px] font-bold px-2 py-0.5 bg-emerald-200/60 text-emerald-900 rounded-full">
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                channelFilter === 'toko' ? 'bg-emerald-600 text-white' : 'bg-emerald-200/70 text-emerald-900'
+              }`}>
                 {channelBreakdown.toko.count} tx
               </span>
             </div>
-            <div className="text-lg font-black text-emerald-900">
+            <div className="text-lg font-black text-emerald-950 mt-2">
               {formatRupiah(channelBreakdown.toko.total)}
             </div>
-            <div className="text-[10px] text-emerald-700 font-medium">
-              {totalOmset > 0 ? ((channelBreakdown.toko.total / totalOmset) * 100).toFixed(1) : 0}% dari total omset
+            <div className="text-[11px] text-emerald-800 font-medium flex items-center justify-between mt-1">
+              <span>{channelBreakdown.toko.items} pcs terjual</span>
+              <span className="font-bold">
+                {grandTimeframeOmset > 0 ? ((channelBreakdown.toko.total / grandTimeframeOmset) * 100).toFixed(1) : 0}%
+              </span>
             </div>
           </div>
 
-          {/* Bazaar / Event */}
-          <div className="p-4 rounded-2xl bg-amber-50/50 border border-amber-200/80 space-y-1.5">
+          {/* Bazaar & Event Card */}
+          <div 
+            onClick={() => {
+              setChannelFilter(channelFilter === 'bazaar' ? 'all' : 'bazaar');
+              setSelectedOutletId('all');
+            }}
+            className={`p-4 rounded-2xl border transition-all cursor-pointer select-none relative ${
+              channelFilter === 'bazaar'
+                ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/30 shadow-sm'
+                : 'bg-amber-50/40 border-amber-200 hover:bg-amber-50/80 hover:border-amber-300'
+            }`}
+          >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+              <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
                 <Tent className="w-4 h-4 text-amber-600" />
-                Bazaar / Event
+                Bazaar & Event
               </span>
-              <span className="text-[11px] font-bold px-2 py-0.5 bg-amber-200/60 text-amber-900 rounded-full">
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                channelFilter === 'bazaar' ? 'bg-amber-600 text-white' : 'bg-amber-200/70 text-amber-900'
+              }`}>
                 {channelBreakdown.bazaar.count} tx
               </span>
             </div>
-            <div className="text-lg font-black text-amber-900">
+            <div className="text-lg font-black text-amber-950 mt-2">
               {formatRupiah(channelBreakdown.bazaar.total)}
             </div>
-            <div className="text-[10px] text-amber-700 font-medium">
-              {totalOmset > 0 ? ((channelBreakdown.bazaar.total / totalOmset) * 100).toFixed(1) : 0}% dari total omset
+            <div className="text-[11px] text-amber-800 font-medium flex items-center justify-between mt-1">
+              <span>{channelBreakdown.bazaar.items} pcs terjual</span>
+              <span className="font-bold">
+                {grandTimeframeOmset > 0 ? ((channelBreakdown.bazaar.total / grandTimeframeOmset) * 100).toFixed(1) : 0}%
+              </span>
             </div>
           </div>
 
-          {/* WhatsApp / Online */}
-          <div className="p-4 rounded-2xl bg-green-50/50 border border-green-200/80 space-y-1.5">
+          {/* WhatsApp / Online Card */}
+          <div 
+            onClick={() => {
+              setChannelFilter(channelFilter === 'whatsapp' ? 'all' : 'whatsapp');
+              setSelectedOutletId('all');
+              setSelectedBazaarName('all');
+            }}
+            className={`p-4 rounded-2xl border transition-all cursor-pointer select-none relative ${
+              channelFilter === 'whatsapp'
+                ? 'bg-green-50 border-green-500 ring-2 ring-green-500/30 shadow-sm'
+                : 'bg-green-50/40 border-green-200 hover:bg-green-50/80 hover:border-green-300'
+            }`}
+          >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-green-950 flex items-center gap-1.5">
+              <span className="text-xs font-black text-green-950 flex items-center gap-1.5">
                 <MessageCircle className="w-4 h-4 text-green-600" />
                 WhatsApp / Online
               </span>
-              <span className="text-[11px] font-bold px-2 py-0.5 bg-green-200/60 text-green-900 rounded-full">
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                channelFilter === 'whatsapp' ? 'bg-green-600 text-white' : 'bg-green-200/70 text-green-900'
+              }`}>
                 {channelBreakdown.whatsapp.count} tx
               </span>
             </div>
-            <div className="text-lg font-black text-green-900">
+            <div className="text-lg font-black text-green-950 mt-2">
               {formatRupiah(channelBreakdown.whatsapp.total)}
             </div>
-            <div className="text-[10px] text-green-700 font-medium">
-              {totalOmset > 0 ? ((channelBreakdown.whatsapp.total / totalOmset) * 100).toFixed(1) : 0}% dari total omset
+            <div className="text-[11px] text-green-800 font-medium flex items-center justify-between mt-1">
+              <span>{channelBreakdown.whatsapp.items} pcs terjual</span>
+              <span className="font-bold">
+                {grandTimeframeOmset > 0 ? ((channelBreakdown.whatsapp.total / grandTimeframeOmset) * 100).toFixed(1) : 0}%
+              </span>
             </div>
           </div>
 
-          {/* Saluran Kustom */}
-          <div className="p-4 rounded-2xl bg-rose-50/50 border border-rose-200/80 space-y-1.5">
+          {/* Saluran Kustom / Lainnya */}
+          <div 
+            onClick={() => {
+              setChannelFilter(channelFilter === 'custom' ? 'all' : 'custom');
+              setSelectedOutletId('all');
+              setSelectedBazaarName('all');
+            }}
+            className={`p-4 rounded-2xl border transition-all cursor-pointer select-none relative ${
+              channelFilter === 'custom'
+                ? 'bg-rose-50 border-[#9D6C72] ring-2 ring-[#9D6C72]/30 shadow-sm'
+                : 'bg-rose-50/40 border-rose-200 hover:bg-rose-50/80 hover:border-rose-300'
+            }`}
+          >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-rose-950 flex items-center gap-1.5">
-                <ShoppingBag className="w-4 h-4 text-[#9D6C72]" />
-                Saluran Kustom
+              <span className="text-xs font-black text-rose-950 flex items-center gap-1.5">
+                <Tag className="w-4 h-4 text-[#9D6C72]" />
+                Saluran Lainnya
               </span>
-              <span className="text-[11px] font-bold px-2 py-0.5 bg-rose-200/60 text-rose-900 rounded-full">
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                channelFilter === 'custom' ? 'bg-[#9D6C72] text-white' : 'bg-rose-200/70 text-rose-900'
+              }`}>
                 {channelBreakdown.custom.count} tx
               </span>
             </div>
-            <div className="text-lg font-black text-rose-900">
+            <div className="text-lg font-black text-rose-950 mt-2">
               {formatRupiah(channelBreakdown.custom.total)}
             </div>
-            <div className="text-[10px] text-rose-700 font-medium">
-              {totalOmset > 0 ? ((channelBreakdown.custom.total / totalOmset) * 100).toFixed(1) : 0}% dari total omset
+            <div className="text-[11px] text-rose-800 font-medium flex items-center justify-between mt-1">
+              <span>{channelBreakdown.custom.items} pcs terjual</span>
+              <span className="font-bold">
+                {grandTimeframeOmset > 0 ? ((channelBreakdown.custom.total / grandTimeframeOmset) * 100).toFixed(1) : 0}%
+              </span>
             </div>
           </div>
 
@@ -658,144 +857,166 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 2.5 MONTHLY DAILY BREAKDOWN & TOP PRODUCTS (For Monthly Recap) */}
+      {/* 3. KOMPARASI PER KATEGORI (HIJAB VS MUKENA) */}
       {/* ========================================================================= */}
-      {(timeframe === 'monthly' || timeframe === 'this_month') && dailyBreakdown.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          
-          {/* Daily Breakdown Table */}
-          <div className="lg:col-span-2 bg-white rounded-3xl p-5 border border-slate-100 shadow-sm space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-xl bg-indigo-50 text-indigo-600">
-                  <Calendar className="w-4 h-4" />
-                </div>
-                <h3 className="text-sm font-bold text-slate-800">
-                  Rincian Penjualan Harian ({MONTH_NAMES[selectedMonth - 1]} {selectedYear})
-                </h3>
-              </div>
-              <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full">
-                {dailyBreakdown.length} hari aktif
-              </span>
+      <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-xl bg-purple-50 text-purple-600">
+              <Sparkles className="w-4 h-4" />
             </div>
-
-            <div className="overflow-x-auto max-h-60">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px] font-bold sticky top-0">
-                    <th className="py-2 px-3">Tanggal</th>
-                    <th className="py-2 px-3 text-center">Transaksi</th>
-                    <th className="py-2 px-3 text-center">Item Terjual</th>
-                    <th className="py-2 px-3 text-right">Omset</th>
-                    <th className="py-2 px-3 text-right">Laba Kotor</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {dailyBreakdown.map((item) => (
-                    <tr key={item.day} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="py-2 px-3 font-bold text-slate-800">
-                        {item.day} {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-                      </td>
-                      <td className="py-2 px-3 text-center text-slate-600 font-medium">
-                        {item.count} tx
-                      </td>
-                      <td className="py-2 px-3 text-center text-slate-700 font-bold">
-                        {item.items} pcs
-                      </td>
-                      <td className="py-2 px-3 text-right font-black text-slate-900">
-                        {formatRupiah(item.total)}
-                      </td>
-                      <td className="py-2 px-3 text-right font-bold text-emerald-700">
-                        {formatRupiah(item.profit)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div>
+              <h2 className="text-sm font-bold text-slate-800">
+                2. Performa Berdasarkan Kategori (Hijab vs Mukena)
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                Analisis omset, kuantitas terjual, dan laba kotor per kategori produk
+              </p>
             </div>
           </div>
 
-          {/* Top Selling Products */}
-          <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm space-y-3 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-xl bg-amber-50 text-amber-600">
-                    <TrendingUp className="w-4 h-4" />
-                  </div>
-                  <h3 className="text-sm font-bold text-slate-800">
-                    Produk Terlaris Bulan Ini
-                  </h3>
-                </div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                  Top 5
+          {categoryFilter !== 'all' && (
+            <button
+              onClick={() => setCategoryFilter('all')}
+              className="text-xs font-bold text-[#9D6C72] hover:underline self-start sm:self-auto"
+            >
+              Tampilkan Semua Kategori
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          
+          {/* Card Kategori Hijab */}
+          <div 
+            onClick={() => setCategoryFilter(categoryFilter === 'Hijab' ? 'all' : 'Hijab')}
+            className={`p-5 rounded-3xl border transition-all cursor-pointer relative overflow-hidden select-none ${
+              categoryFilter === 'Hijab'
+                ? 'bg-gradient-to-br from-pink-50 to-rose-50/80 border-[#9D6C72] ring-2 ring-[#9D6C72]/30 shadow-md'
+                : 'bg-pink-50/30 border-pink-100 hover:bg-pink-50/60 hover:border-pink-200 shadow-2xs'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🧕</span>
+                <span className="font-black text-slate-800 text-sm">
+                  Kategori HIJAB
+                </span>
+                {categoryFilter === 'Hijab' && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 bg-[#9D6C72] text-white rounded-full">
+                    Filter Aktif
+                  </span>
+                )}
+              </div>
+              <span className="text-xs font-extrabold px-2.5 py-1 bg-white border border-rose-200 text-rose-900 rounded-xl shadow-2xs">
+                {categoryBreakdown.hijab.qty} pcs terjual
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-rose-100/80">
+              <div>
+                <span className="text-[10px] text-slate-500 block font-medium">Omset Hijab</span>
+                <span className="text-base font-black text-slate-900">
+                  {formatRupiah(categoryBreakdown.hijab.omset)}
                 </span>
               </div>
+              <div>
+                <span className="text-[10px] text-slate-500 block font-medium">Laba Kotor</span>
+                <span className="text-base font-black text-emerald-700">
+                  {formatRupiah(categoryBreakdown.hijab.profit)}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 block font-medium">Margin Laba</span>
+                <span className="text-base font-black text-[#9D6C72]">
+                  {categoryBreakdown.hijab.margin.toFixed(1)}%
+                </span>
+              </div>
+            </div>
 
-              {topProducts.length === 0 ? (
-                <div className="py-8 text-center text-slate-400 text-xs">
-                  Belum ada data penjualan pada periode ini.
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {topProducts.map((p, idx) => (
-                    <div key={p.id} className="flex items-center justify-between gap-2 p-2 rounded-2xl bg-slate-50 hover:bg-slate-100/80 transition-colors">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
-                          idx === 0 ? 'bg-amber-400 text-amber-950 shadow-2xs' :
-                          idx === 1 ? 'bg-slate-300 text-slate-800' :
-                          idx === 2 ? 'bg-amber-700/20 text-amber-900' : 'bg-slate-200 text-slate-700'
-                        }`}>
-                          {idx + 1}
-                        </span>
-                        <div className="truncate">
-                          <h4 className="text-xs font-bold text-slate-800 truncate" title={p.name}>
-                            {p.name}
-                          </h4>
-                          <span className="text-[10px] text-slate-400">
-                            {p.category} • {p.sku}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-xs font-black text-slate-900">
-                          {p.qty} <span className="text-[10px] text-slate-500 font-normal">pcs</span>
-                        </div>
-                        <div className="text-[10px] text-emerald-700 font-semibold">
-                          {formatRupiah(p.revenue)}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div className="mt-3 pt-2 border-t border-rose-100/60 flex items-center justify-between text-[11px] text-slate-500 font-medium">
+              <span>Terdapat pada <strong>{categoryBreakdown.hijab.txCount}</strong> transaksi</span>
+              <span className="text-[#9D6C72] font-bold">Klik untuk filter transaksi Hijab →</span>
+            </div>
+          </div>
+
+          {/* Card Kategori Mukena */}
+          <div 
+            onClick={() => setCategoryFilter(categoryFilter === 'Mukena' ? 'all' : 'Mukena')}
+            className={`p-5 rounded-3xl border transition-all cursor-pointer relative overflow-hidden select-none ${
+              categoryFilter === 'Mukena'
+                ? 'bg-gradient-to-br from-teal-50 to-emerald-50/80 border-emerald-600 ring-2 ring-emerald-600/30 shadow-md'
+                : 'bg-teal-50/30 border-teal-100 hover:bg-teal-50/60 hover:border-teal-200 shadow-2xs'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🥻</span>
+                <span className="font-black text-slate-800 text-sm">
+                  Kategori MUKENA
+                </span>
+                {categoryFilter === 'Mukena' && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-600 text-white rounded-full">
+                    Filter Aktif
+                  </span>
+                )}
+              </div>
+              <span className="text-xs font-extrabold px-2.5 py-1 bg-white border border-teal-200 text-teal-900 rounded-xl shadow-2xs">
+                {categoryBreakdown.mukena.qty} pcs terjual
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-teal-100/80">
+              <div>
+                <span className="text-[10px] text-slate-500 block font-medium">Omset Mukena</span>
+                <span className="text-base font-black text-slate-900">
+                  {formatRupiah(categoryBreakdown.mukena.omset)}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 block font-medium">Laba Kotor</span>
+                <span className="text-base font-black text-emerald-700">
+                  {formatRupiah(categoryBreakdown.mukena.profit)}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 block font-medium">Margin Laba</span>
+                <span className="text-base font-black text-teal-700">
+                  {categoryBreakdown.mukena.margin.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-2 border-t border-teal-100/60 flex items-center justify-between text-[11px] text-slate-500 font-medium">
+              <span>Terdapat pada <strong>{categoryBreakdown.mukena.txCount}</strong> transaksi</span>
+              <span className="text-emerald-700 font-bold">Klik untuk filter transaksi Mukena →</span>
             </div>
           </div>
 
         </div>
-      )}
+      </div>
 
       {/* ========================================================================= */}
-      {/* 3. TRANSACTIONS TABLE WITH ADVANCED FILTERS */}
+      {/* 4. TRANSACTIONS TABLE WITH DEDICATED CHANNEL & CATEGORY FILTERS */}
       {/* ========================================================================= */}
-      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden space-y-0">
         
         {/* Table Filter Toolbar */}
-        <div className="p-4 sm:p-5 border-b border-slate-100 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="p-4 sm:p-5 border-b border-slate-100 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Receipt className="w-5 h-5 text-[#9D6C72]" />
-              <h2 className="text-base font-bold text-slate-800">
-                Riwayat Transaksi Penjualan ({filteredTransactions.length})
+              <h2 className="text-base font-black text-slate-800">
+                Daftar Transaksi Penjualan ({filteredTransactions.length})
               </h2>
             </div>
 
             {/* Fast search */}
-            <div className="relative w-full sm:w-72">
+            <div className="relative w-full md:w-80">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Cari no. struk, nama pembeli, bazaar..."
+                placeholder="Cari no. struk, pelanggan, bazaar, produk..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-[#9D6C72]"
@@ -803,23 +1024,33 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          {/* Secondary Filters: Channel & Payment Method */}
+          {/* Filter Bar 1: Saluran Penjualan (Toko Offline, Bazaar, WhatsApp) */}
           <div className="flex items-center gap-2 flex-wrap text-xs pt-1">
-            <span className="font-semibold text-slate-500">Filter Saluran:</span>
+            <span className="font-bold text-slate-500 shrink-0 flex items-center gap-1">
+              <Store className="w-3.5 h-3.5" />
+              Saluran:
+            </span>
             
             <button
-              onClick={() => setChannelFilter('all')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                channelFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              onClick={() => {
+                setChannelFilter('all');
+                setSelectedOutletId('all');
+                setSelectedBazaarName('all');
+              }}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                channelFilter === 'all' ? 'bg-slate-900 text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
               Semua Saluran
             </button>
 
             <button
-              onClick={() => setChannelFilter('toko')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 ${
-                channelFilter === 'toko' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+              onClick={() => {
+                setChannelFilter('toko');
+                setSelectedBazaarName('all');
+              }}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                channelFilter === 'toko' ? 'bg-emerald-600 text-white shadow-2xs' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
               }`}
             >
               <Store className="w-3.5 h-3.5" />
@@ -827,9 +1058,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
 
             <button
-              onClick={() => setChannelFilter('bazaar')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 ${
-                channelFilter === 'bazaar' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+              onClick={() => {
+                setChannelFilter('bazaar');
+                setSelectedOutletId('all');
+              }}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                channelFilter === 'bazaar' ? 'bg-amber-600 text-white shadow-2xs' : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
               }`}
             >
               <Tent className="w-3.5 h-3.5" />
@@ -837,22 +1071,97 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
 
             <button
-              onClick={() => setChannelFilter('whatsapp')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 ${
-                channelFilter === 'whatsapp' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-800 hover:bg-green-100'
+              onClick={() => {
+                setChannelFilter('whatsapp');
+                setSelectedOutletId('all');
+                setSelectedBazaarName('all');
+              }}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                channelFilter === 'whatsapp' ? 'bg-green-600 text-white shadow-2xs' : 'bg-green-50 text-green-800 hover:bg-green-100'
               }`}
             >
               <MessageCircle className="w-3.5 h-3.5" />
               WhatsApp
             </button>
 
+            {/* Sub-filter if Toko Offline is chosen */}
+            {channelFilter === 'toko' && outlets.length > 0 && (
+              <select
+                value={selectedOutletId}
+                onChange={(e) => setSelectedOutletId(e.target.value)}
+                className="px-2.5 py-1.5 bg-emerald-50 border border-emerald-300 rounded-xl text-xs font-bold text-emerald-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              >
+                <option value="all">Semua Cabang Toko</option>
+                {outlets.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {/* Sub-filter if Bazaar is chosen */}
+            {channelFilter === 'bazaar' && availableBazaarNames.length > 0 && (
+              <select
+                value={selectedBazaarName}
+                onChange={(e) => setSelectedBazaarName(e.target.value)}
+                className="px-2.5 py-1.5 bg-amber-50 border border-amber-300 rounded-xl text-xs font-bold text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              >
+                <option value="all">Semua Event Bazaar</option>
+                {availableBazaarNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {/* Filter Bar 2: Kategori Produk (Hijab vs Mukena) & Payment Method */}
+          <div className="flex items-center justify-between gap-3 flex-wrap text-xs pt-1 border-t border-slate-100/80">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-slate-500 shrink-0 flex items-center gap-1">
+                <Tag className="w-3.5 h-3.5" />
+                Kategori:
+              </span>
+
+              <button
+                onClick={() => setCategoryFilter('all')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                  categoryFilter === 'all' ? 'bg-[#9D6C72] text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Semua Kategori
+              </button>
+
+              <button
+                onClick={() => setCategoryFilter('Hijab')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                  categoryFilter === 'Hijab' ? 'bg-pink-600 text-white shadow-2xs' : 'bg-pink-50 text-pink-800 hover:bg-pink-100'
+                }`}
+              >
+                <span>🧕</span>
+                <span>Hijab Only</span>
+              </button>
+
+              <button
+                onClick={() => setCategoryFilter('Mukena')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                  categoryFilter === 'Mukena' ? 'bg-teal-700 text-white shadow-2xs' : 'bg-teal-50 text-teal-900 hover:bg-teal-100'
+                }`}
+              >
+                <span>🥻</span>
+                <span>Mukena Only</span>
+              </button>
+            </div>
+
             {/* Payment Filter */}
-            <div className="ml-auto flex items-center gap-1.5">
-              <span className="font-semibold text-slate-500">Metode Bayar:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-slate-500">Metode Bayar:</span>
               <select
                 value={paymentFilter}
                 onChange={(e) => setPaymentFilter(e.target.value)}
-                className="px-2.5 py-1 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700"
+                className="px-2.5 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
               >
                 <option value="all">Semua Metode</option>
                 <option value="cash">Tunai (Cash)</option>
@@ -862,42 +1171,71 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               </select>
             </div>
           </div>
+
         </div>
 
         {/* Transactions Table */}
         <div className="overflow-x-auto">
           {filteredTransactions.length === 0 ? (
             <div className="p-12 text-center text-slate-400">
-              <Receipt className="w-8 h-8 mx-auto text-slate-300 mb-2" />
-              <p className="text-xs font-bold">Belum ada transaksi penjualan yang tercatat.</p>
-              <p className="text-[11px]">Buka tab Input Penjualan untuk mulai mencatat transaksi baru.</p>
+              <Receipt className="w-9 h-9 mx-auto text-slate-300 mb-2" />
+              <p className="text-xs font-bold text-slate-600">Tidak ada transaksi yang cocok dengan filter aktif.</p>
+              <p className="text-[11px] text-slate-400 mt-1">Coba ubah filter saluran, kategori produk, atau periode bulan di atas.</p>
+              {(channelFilter !== 'all' || categoryFilter !== 'all' || searchTerm) && (
+                <button
+                  onClick={() => {
+                    setChannelFilter('all');
+                    setCategoryFilter('all');
+                    setPaymentFilter('all');
+                    setSelectedOutletId('all');
+                    setSelectedBazaarName('all');
+                    setSearchTerm('');
+                  }}
+                  className="mt-3 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
+                >
+                  Reset Semua Filter
+                </button>
+              )}
             </div>
           ) : (
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-[10px] font-bold">
-                  <th className="py-3 px-4">No. Transaksi / Waktu</th>
-                  <th className="py-3 px-4">Saluran & Lokasi</th>
-                  <th className="py-3 px-4">Pelanggan / Petugas</th>
-                  <th className="py-3 px-4">Produk Item</th>
-                  <th className="py-3 px-4">Metode Bayar</th>
-                  <th className="py-3 px-4 text-right">Total Transaksi</th>
-                  <th className="py-3 px-4 text-center">Aksi</th>
+                <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-[10px] font-bold">
+                  <th className="py-3.5 px-4">No. Transaksi & Waktu</th>
+                  <th className="py-3.5 px-4">Saluran & Sumber</th>
+                  <th className="py-3.5 px-4">Rincian Item per Kategori</th>
+                  <th className="py-3.5 px-4">Pelanggan / Petugas</th>
+                  <th className="py-3.5 px-4">Metode Bayar</th>
+                  <th className="py-3.5 px-4 text-right">Total Transaksi</th>
+                  <th className="py-3.5 px-4 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredTransactions.map((tx) => {
-                  const itemCount = tx.items.reduce((s, i) => s + i.quantity, 0);
+                  const itemCount = tx.items.reduce((s, i) => s + (i.quantity || 1), 0);
+                  
+                  // Categorize items in this transaction
+                  let hijabQtyInTx = 0;
+                  let mukenaQtyInTx = 0;
+                  let otherQtyInTx = 0;
+
+                  tx.items.forEach((item) => {
+                    const cat = getItemCategory(item);
+                    const qty = item.quantity || 1;
+                    if (cat.toLowerCase() === 'hijab') hijabQtyInTx += qty;
+                    else if (cat.toLowerCase() === 'mukena') mukenaQtyInTx += qty;
+                    else otherQtyInTx += qty;
+                  });
 
                   return (
-                    <tr key={tx.id} className="hover:bg-slate-50/70 transition-colors">
+                    <tr key={tx.id} className="hover:bg-slate-50/80 transition-colors">
                       
                       {/* No & Waktu */}
                       <td className="py-3 px-4">
-                        <div className="font-bold text-slate-900 font-mono">
+                        <div className="font-bold text-slate-900 font-mono text-xs">
                           {tx.transactionNumber}
                         </div>
-                        <div className="text-[11px] text-slate-400">
+                        <div className="text-[11px] text-slate-400 mt-0.5">
                           {formatDateTime(tx.date)}
                         </div>
                       </td>
@@ -914,10 +1252,45 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         </div>
                       </td>
 
+                      {/* Rincian Item dengan Badge Kategori Hijab / Mukena */}
+                      <td className="py-3 px-4">
+                        <div className="space-y-1.5">
+                          
+                          {/* Category Tag Breakdown */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {hijabQtyInTx > 0 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black bg-pink-100 text-pink-900 border border-pink-200">
+                                <span>🧕</span>
+                                <span>Hijab ({hijabQtyInTx} pcs)</span>
+                              </span>
+                            )}
+                            {mukenaQtyInTx > 0 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black bg-teal-100 text-teal-900 border border-teal-200">
+                                <span>🥻</span>
+                                <span>Mukena ({mukenaQtyInTx} pcs)</span>
+                              </span>
+                            )}
+                            {otherQtyInTx > 0 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                <span>Lainnya ({otherQtyInTx} pcs)</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Product Titles Snippet */}
+                          <div 
+                            className="text-[11px] text-slate-600 max-w-[260px] truncate" 
+                            title={tx.items.map(i => `${i.productName} (${i.quantity || 1} pcs)`).join(', ')}
+                          >
+                            {tx.items.map(i => `${i.productName} (${i.quantity || 1})`).join(', ')}
+                          </div>
+                        </div>
+                      </td>
+
                       {/* Pelanggan & Kasir */}
                       <td className="py-3 px-4">
                         <div className="font-bold text-slate-800">
-                          {tx.customerName}
+                          {tx.customerName || 'Pelanggan Umum'}
                         </div>
                         {tx.customerPhone && (
                           <div className="text-[11px] text-emerald-700 font-medium flex items-center gap-0.5">
@@ -926,17 +1299,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           </div>
                         )}
                         <div className="text-[10px] text-slate-400">
-                          {tx.cashier}
-                        </div>
-                      </td>
-
-                      {/* Items */}
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-800">
-                          {itemCount} pcs
-                        </div>
-                        <div className="text-[11px] text-slate-500 max-w-[200px] truncate" title={tx.items.map(i => `${i.productName} (${i.quantity})`).join(', ')}>
-                          {tx.items.map(i => i.productName).join(', ')}
+                          Petugas: {tx.cashier || 'Admin'}
                         </div>
                       </td>
 
@@ -952,21 +1315,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         <div className="font-black text-slate-900 text-sm">
                           {formatRupiah(tx.total)}
                         </div>
-                        {tx.discount > 0 && (
+                        {tx.discount && tx.discount > 0 ? (
                           <div className="text-[10px] text-rose-600 font-semibold">
                             Diskon: -{formatRupiah(tx.discount)}
                           </div>
-                        )}
+                        ) : null}
                       </td>
 
                       {/* Action */}
                       <td className="py-3 px-4 text-center">
                         <button
                           onClick={() => onViewReceipt(tx)}
-                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-colors"
+                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-[#9D6C72] hover:text-white text-slate-700 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-colors"
                           title="Lihat / Cetak Struk"
                         >
-                          <Eye className="w-3.5 h-3.5 text-slate-500" />
+                          <Eye className="w-3.5 h-3.5" />
                           <span>Struk</span>
                         </button>
                       </td>

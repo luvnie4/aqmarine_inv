@@ -276,10 +276,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                             setIsUserMenuOpen(false);
                             onOpenManageUsers();
                           }}
-                          className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-rose-50 hover:text-[#9E6B70] rounded-xl flex items-center gap-2 transition-colors"
+                          className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-rose-50 hover:text-[#9E6B70] rounded-xl flex items-center justify-between transition-colors"
                         >
-                          <UserCog className="w-4 h-4 text-[#9E6B70]" />
-                          <span>Kelola Data Pengguna</span>
+                          <div className="flex items-center gap-2">
+                            {currentUser.role === 'owner' ? (
+                              <Crown className="w-4 h-4 text-amber-600" />
+                            ) : (
+                              <UserCog className="w-4 h-4 text-[#9E6B70]" />
+                            )}
+                            <span>
+                              {currentUser.role === 'owner' ? 'Kelola Data Pengguna' : 'Pengaturan Akun Saya'}
+                            </span>
+                          </div>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase ${
+                            currentUser.role === 'owner' ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'
+                          }`}>
+                            {currentUser.role === 'owner' ? 'Semua User' : 'Akun Sendiri'}
+                          </span>
                         </button>
                       </div>
                     )}
