@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AQMARINE Inventory & POS Blueprint",
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Katalog produk dan stok cabang AQMARINE",
+      "type": "object",
+      "properties": {
+        "sku": { "type": "string" },
+        "barcode": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "subCategory": { "type": "string" },
+        "hpp": { "type": "number" },
+        "priceRetail": { "type": "number" },
+        "priceGrosir": { "type": "number" },
+        "stockToko": { "type": "number" },
+        "outletStocks": { "type": "object" },
+        "minStockAlert": { "type": "number" },
+        "unit": { "type": "string" },
+        "notes": { "type": "string" },
+        "images": { "type": "array" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "category", "priceRetail"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Riwayat transaksi kasir dan invoice penjualan",
+      "type": "object",
+      "properties": {
+        "transactionNumber": { "type": "string" },
+        "channelId": { "type": "string" },
+        "channelName": { "type": "string" },
+        "outletId": { "type": "string" },
+        "outletName": { "type": "string" },
+        "cashierName": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "discount": { "type": "number" },
+        "tax": { "type": "number" },
+        "total": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "paymentStatus": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["transactionNumber", "total", "createdAt"]
+    },
+    "Transfer": {
+      "title": "Transfer",
+      "description": "Mutasi dan transfer stok antar cabang toko",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "fromLocation": { "type": "string" },
+        "fromLocationName": { "type": "string" },
+        "toLocation": { "type": "string" },
+        "toLocationName": { "type": "string" },
+        "quantity": { "type": "number" },
+        "notes": { "type": "string" },
+        "picName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["productId", "quantity", "createdAt"]
+    },
+    "Adjustment": {
+      "title": "Adjustment",
+      "description": "Stok opname dan penyesuaian selisih fisik",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "outletId": { "type": "string" },
+        "outletName": { "type": "string" },
+        "systemStock": { "type": "number" },
+        "physicalStock": { "type": "number" },
+        "difference": { "type": "number" },
+        "type": { "type": "string" },
+        "reason": { "type": "string" },
+        "picName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["productId", "difference", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Katalog produk dan multi-outlet inventory"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Riwayat transaksi penjualan kasir"
+    },
+    "/transfers/{transferId}": {
+      "schema": "Transfer",
+      "description": "Riwayat mutasi transfer stok antar toko"
+    },
+    "/adjustments/{adjustmentId}": {
+      "schema": "Adjustment",
+      "description": "Riwayat opname penyesuaian stok"
+    },
+    "/outlets/{outletId}": {
+      "schema": "object",
+      "description": "Daftar cabang outlet butik"
+    },
+    "/salesChannels/{channelId}": {
+      "schema": "object",
+      "description": "Daftar saluran penjualan"
+    },
+    "/bazaars/{bazaarId}": {
+      "schema": "object",
+      "description": "Daftar bazaar dan pop-up event"
+    },
+    "/subCategories/{subCatId}": {
+      "schema": "object",
+      "description": "Daftar sub-kategori hijab dan mukena"
+    },
+    "/userAccounts/{userId}": {
+      "schema": "object",
+      "description": "Daftar akun staf dan pengguna"
+    }
+  }
+}

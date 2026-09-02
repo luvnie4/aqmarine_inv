@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Inventory, Transactions, Outlets, Channels, Opname, and Users
+    match /products/{productId} {
+      allow read, write: if true;
+    }
+    match /transactions/{transactionId} {
+      allow read, write: if true;
+    }
+    match /transfers/{transferId} {
+      allow read, write: if true;
+    }
+    match /adjustments/{adjustmentId} {
+      allow read, write: if true;
+    }
+    match /outlets/{outletId} {
+      allow read, write: if true;
+    }
+    match /salesChannels/{channelId} {
+      allow read, write: if true;
+    }
+    match /bazaars/{bazaarId} {
+      allow read, write: if true;
+    }
+    match /subCategories/{subCatId} {
+      allow read, write: if true;
+    }
+    match /userAccounts/{userId} {
+      allow read, write: if true;
+    }
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
