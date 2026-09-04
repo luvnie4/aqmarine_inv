@@ -29,6 +29,9 @@ import {
   Eye,
   MapPin,
   Calendar,
+  Clock,
+  RotateCcw,
+  CalendarDays,
   Edit3
 } from 'lucide-react';
 import { 
@@ -42,7 +45,7 @@ import {
   BazaarEvent,
   UserAccount
 } from '../types';
-import { formatRupiah, formatNumber, generateTransactionCode } from '../utils/formatters';
+import { formatRupiah, formatNumber, generateTransactionCode, toDateInputString, toTimeInputString, formatDateTime } from '../utils/formatters';
 import { getOutlets, getChannels, getDefaultOutlet } from '../utils/outletStorage';
 import { getBazaarEvents, getActiveBazaar, setActiveBazaarEvent } from '../utils/bazaarStorage';
 import { ManageOutletsModal } from './ManageOutletsModal';
@@ -117,6 +120,35 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
   const [discountAmount, setDiscountAmount] = useState<number>(0);
   const [notes, setNotes] = useState('');
   const [operatorName, setOperatorName] = useState(currentUser?.name || 'Staff Penjualan');
+
+  // Date & Time Adjustment State
+  const [saleDate, setSaleDate] = useState<string>(() => toDateInputString(new Date()));
+  const [saleTime, setSaleTime] = useState<string>(() => toTimeInputString(new Date()));
+  const [isCustomDateActive, setIsCustomDateActive] = useState<boolean>(false);
+
+  const handleSetToday = () => {
+    const now = new Date();
+    setSaleDate(toDateInputString(now));
+    setSaleTime(toTimeInputString(now));
+    setIsCustomDateActive(false);
+  };
+
+  const handleSetYesterday = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    setSaleDate(toDateInputString(d));
+    setIsCustomDateActive(true);
+  };
+
+  const handleDateChange = (val: string) => {
+    setSaleDate(val);
+    const todayStr = toDateInputString(new Date());
+    setIsCustomDateActive(val !== todayStr);
+  };
+
+  const handleTimeChange = (val: string) => {
+    setSaleTime(val);
+  };
 
   useEffect(() => {
     if (currentUser?.name) {
@@ -369,12 +401,24 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
 
     const locationName = activeOutlet.name;
     const customChObj = channels.find(c => c.id === selectedCustomChannelId);
-    const txNumber = generateTransactionCode();
+
+    // Calculate chosen transaction date & time
+    let transactionIsoDate: string;
+    try {
+      const [year, month, day] = saleDate.split('-').map(Number);
+      const [hours, minutes] = (saleTime || '12:00').split(':').map(Number);
+      const chosenDate = new Date(year, (month || 1) - 1, day || 1, hours || 0, minutes || 0, 0);
+      transactionIsoDate = !isNaN(chosenDate.getTime()) ? chosenDate.toISOString() : new Date().toISOString();
+    } catch {
+      transactionIsoDate = new Date().toISOString();
+    }
+
+    const txNumber = generateTransactionCode(transactionIsoDate);
 
     const transaction: SaleTransaction = {
       id: `tx-${Date.now()}`,
       transactionNumber: txNumber,
-      date: new Date().toISOString(),
+      date: transactionIsoDate,
       items: cart.map((c) => ({
         productId: c.product.id,
         productName: c.product.name,
@@ -436,6 +480,25 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
             type="button"
             onClick={() => setWarningMessage(null)}
             className="text-amber-700 hover:text-amber-950 text-xs font-bold ml-2"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
+
+      {/* Success Notification Banner */}
+      {lastSavedTxNumber && (
+        <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-2xl text-xs font-bold flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>
+              Transaksi <strong>{lastSavedTxNumber}</strong> berhasil disimpan ke database penjualan!
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLastSavedTxNumber(null)}
+            className="text-emerald-700 hover:text-emerald-950 text-xs font-bold ml-2"
           >
             Tutup
           </button>
@@ -1108,6 +1171,109 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                   Kosongkan
                 </button>
               )}
+            </div>
+
+            {/* Pengaturan Tanggal & Waktu Penjualan (Atur Tanggal) */}
+            <div className={`p-3 rounded-2xl border transition-all ${
+              isCustomDateActive 
+                ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-400/20 shadow-xs' 
+                : 'bg-slate-50/90 border-slate-200/90 shadow-2xs'
+            }`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <Calendar className={`w-4 h-4 ${isCustomDateActive ? 'text-amber-700' : 'text-[#9E6B70]'}`} />
+                  <span className="text-xs font-bold text-slate-800">Tanggal & Waktu Penjualan</span>
+                </div>
+                
+                {isCustomDateActive ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-300">
+                      <span>🕒 Tanggal Khusus</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleSetToday}
+                      className="text-[10px] text-amber-900 font-bold hover:underline flex items-center gap-0.5"
+                      title="Kembalikan ke waktu sekarang"
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" />
+                      <span>Reset</span>
+                    </button>
+                  </div>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300">
+                    <span>⚡ Real-time (Hari Ini)</span>
+                  </span>
+                )}
+              </div>
+
+              {/* Date & Time Input Fields */}
+              <div className="grid grid-cols-12 gap-2">
+                <div className="col-span-7">
+                  <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Tanggal Transaksi:</label>
+                  <input
+                    id="sale-date-input"
+                    type="date"
+                    value={saleDate}
+                    onChange={(e) => handleDateChange(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#9E6B70] shadow-2xs"
+                  />
+                </div>
+
+                <div className="col-span-5">
+                  <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Jam / Waktu:</label>
+                  <input
+                    id="sale-time-input"
+                    type="time"
+                    value={saleTime}
+                    onChange={(e) => handleTimeChange(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#9E6B70] shadow-2xs"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Presets & Formatted Indonesian Date */}
+              <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-200/70">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleSetToday}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                      !isCustomDateActive && saleDate === toDateInputString()
+                        ? 'bg-[#9E6B70] text-white shadow-2xs'
+                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                    }`}
+                  >
+                    ⚡ Hari Ini
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSetYesterday}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                      isCustomDateActive
+                        ? 'bg-amber-600 text-white shadow-2xs'
+                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                    }`}
+                  >
+                    📅 Kemarin
+                  </button>
+                </div>
+
+                <div className="text-[10px] text-slate-600 font-semibold truncate text-right">
+                  {formatDateTime(
+                    (() => {
+                      try {
+                        const [y, m, d] = saleDate.split('-').map(Number);
+                        const [hh, mm] = (saleTime || '12:00').split(':').map(Number);
+                        return new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0).toISOString();
+                      } catch {
+                        return new Date().toISOString();
+                      }
+                    })()
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Items List */}

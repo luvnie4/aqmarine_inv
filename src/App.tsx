@@ -564,6 +564,15 @@ export function App() {
     setReceiptTransaction(tx);
   };
 
+  // Update Existing Transaction (e.g. adjust transaction date)
+  const handleUpdateTransaction = (updatedTx: SaleTransaction) => {
+    const updated = transactions.map((t) => (t.id === updatedTx.id ? updatedTx : t));
+    updated.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    setTransactions(updated);
+    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updated));
+    saveDocToFirestore(COLLECTIONS.TRANSACTIONS, updatedTx).catch(console.warn);
+  };
+
   // Force Push & Sync All Data to Firestore (Bazaar, Outlets, Channels, Products, Users, etc.)
   const handleForceSyncAll = async () => {
     try {
@@ -748,6 +757,7 @@ export function App() {
             transactions={transactions}
             products={products}
             onViewReceipt={(tx) => setReceiptTransaction(tx)}
+            onUpdateTransaction={handleUpdateTransaction}
           />
         )}
       </main>

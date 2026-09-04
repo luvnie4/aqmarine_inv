@@ -20,10 +20,14 @@ import {
   Layers,
   MapPin,
   CheckCircle2,
-  PieChart as PieChartIcon
+  PieChart as PieChartIcon,
+  Edit2,
+  Clock,
+  RotateCcw,
+  X
 } from 'lucide-react';
 import { SaleTransaction, Product } from '../types';
-import { formatRupiah, formatDateTime, exportToCSV } from '../utils/formatters';
+import { formatRupiah, formatDateTime, exportToCSV, toDateInputString, toTimeInputString } from '../utils/formatters';
 import { getOutlets } from '../utils/outletStorage';
 import { getBazaarEvents } from '../utils/bazaarStorage';
 
@@ -31,6 +35,7 @@ interface ReportsViewProps {
   transactions: SaleTransaction[];
   products: Product[];
   onViewReceipt: (transaction: SaleTransaction) => void;
+  onUpdateTransaction?: (transaction: SaleTransaction) => void;
 }
 
 const MONTH_NAMES = [
@@ -42,9 +47,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   transactions,
   products,
   onViewReceipt,
+  onUpdateTransaction,
 }) => {
   const currentDate = new Date();
-  const [timeframe, setTimeframe] = useState<'today' | 'last7' | 'this_month' | 'monthly' | 'all'>('monthly');
+  const [timeframe, setTimeframe] = useState<'today' | 'last7' | 'this_month' | 'monthly' | 'custom_date' | 'all'>('monthly');
+  const [filterCustomDate, setFilterCustomDate] = useState<string>(() => toDateInputString(new Date()));
   const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth() + 1); // 1-12
   const [selectedYear, setSelectedYear] = useState<number>(currentDate.getFullYear());
   
@@ -58,6 +65,44 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   
   // Category Filter: 'all' | 'Hijab' | 'Mukena' | 'Lainnya'
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+
+  // Edit Transaction Date State
+  const [editingTxDate, setEditingTxDate] = useState<SaleTransaction | null>(null);
+  const [editInputDate, setEditInputDate] = useState<string>('');
+  const [editInputTime, setEditInputTime] = useState<string>('');
+  const [editSuccessMsg, setEditSuccessMsg] = useState<string | null>(null);
+
+  const handleOpenEditDate = (tx: SaleTransaction) => {
+    setEditingTxDate(tx);
+    const txDate = tx.date ? new Date(tx.date) : new Date();
+    setEditInputDate(toDateInputString(!isNaN(txDate.getTime()) ? txDate : new Date()));
+    setEditInputTime(toTimeInputString(!isNaN(txDate.getTime()) ? txDate : new Date()));
+  };
+
+  const handleSaveDateChange = () => {
+    if (!editingTxDate || !editInputDate) return;
+    try {
+      const [y, m, d] = editInputDate.split('-').map(Number);
+      const [hh, mm] = (editInputTime || '12:00').split(':').map(Number);
+      const newDateObj = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
+      const newIso = !isNaN(newDateObj.getTime()) ? newDateObj.toISOString() : editingTxDate.date;
+      
+      const updatedTx: SaleTransaction = {
+        ...editingTxDate,
+        date: newIso,
+      };
+
+      if (onUpdateTransaction) {
+        onUpdateTransaction(updatedTx);
+      }
+
+      setEditSuccessMsg(`Tanggal transaksi ${editingTxDate.transactionNumber} berhasil diperbarui!`);
+      setTimeout(() => setEditSuccessMsg(null), 3500);
+      setEditingTxDate(null);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const outlets = useMemo(() => getOutlets(), []);
   const bazaars = useMemo(() => getBazaarEvents(), []);
@@ -118,22 +163,42 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     }
   };
 
+  // Helper to compare dates cleanly
+  const matchesDay = (isoString: string, targetDateStr: string) => {
+    if (!isoString || !targetDateStr) return false;
+    if (isoString.startsWith(targetDateStr)) return true;
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return false;
+    const localDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return localDateStr === targetDateStr;
+  };
+
   // Base Timeframe Filtered Transactions (before channel/category filters)
   const baseTimeframeTransactions = useMemo(() => {
     const now = new Date();
-    const todayDate = now.toISOString().slice(0, 10);
+    const todayDate = toDateInputString(now);
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const thisMonthPrefix = now.toISOString().slice(0, 7);
+    const thisMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const selectedMonthlyPrefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
 
     return transactions.filter((tx) => {
-      if (timeframe === 'today' && !tx.date.startsWith(todayDate)) return false;
+      if (!tx.date) return false;
+      if (timeframe === 'today' && !matchesDay(tx.date, todayDate)) return false;
       if (timeframe === 'last7' && new Date(tx.date) < sevenDaysAgo) return false;
-      if (timeframe === 'this_month' && !tx.date.startsWith(thisMonthPrefix)) return false;
-      if (timeframe === 'monthly' && !tx.date.startsWith(selectedMonthlyPrefix)) return false;
+      if (timeframe === 'this_month') {
+        const d = new Date(tx.date);
+        const prefix = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        if (prefix !== thisMonthPrefix) return false;
+      }
+      if (timeframe === 'monthly') {
+        const d = new Date(tx.date);
+        const prefix = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        if (prefix !== selectedMonthlyPrefix) return false;
+      }
+      if (timeframe === 'custom_date' && !matchesDay(tx.date, filterCustomDate)) return false;
       return true;
     });
-  }, [transactions, timeframe, selectedMonth, selectedYear]);
+  }, [transactions, timeframe, selectedMonth, selectedYear, filterCustomDate]);
 
   // Filter transactions based on date, channel, specific outlet/bazaar, category, payment & search
   const filteredTransactions = useMemo(() => {
@@ -496,6 +561,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               Pilih Bulan
             </button>
             <button
+              onClick={() => setTimeframe('custom_date')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                timeframe === 'custom_date' ? 'bg-[#9D6C72] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Pilih Tanggal
+            </button>
+            <button
               onClick={() => setTimeframe('all')}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                 timeframe === 'all' ? 'bg-[#9D6C72] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
@@ -515,6 +588,58 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Success Notification Banner for Date Edit */}
+      {editSuccessMsg && (
+        <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-2xl text-xs font-bold flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{editSuccessMsg}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setEditSuccessMsg(null)}
+            className="text-emerald-700 hover:text-emerald-950 text-xs font-bold ml-2"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
+
+      {/* Custom Specific Date Selection Bar */}
+      {timeframe === 'custom_date' && (
+        <div className="bg-gradient-to-r from-amber-50/80 via-white to-orange-50/60 p-4 rounded-3xl border border-amber-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-amber-600 text-white shadow-xs">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase tracking-wider font-bold text-amber-800">
+                Filter Transaksi Berdasarkan Tanggal Spesifik
+              </span>
+              <div className="text-base font-black text-slate-800">
+                {formatDateTime(`${filterCustomDate}T12:00:00.000Z`).split(',')[0]}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="date"
+              value={filterCustomDate}
+              onChange={(e) => setFilterCustomDate(e.target.value)}
+              className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-amber-500"
+            />
+            <button
+              type="button"
+              onClick={() => setFilterCustomDate(toDateInputString(new Date()))}
+              className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl shadow-2xs transition-all"
+            >
+              Hari Ini
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Month & Year Selection Bar (Active on 'monthly' and 'this_month') */}
       {(timeframe === 'monthly' || timeframe === 'this_month') && (
@@ -1235,8 +1360,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         <div className="font-bold text-slate-900 font-mono text-xs">
                           {tx.transactionNumber}
                         </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          {formatDateTime(tx.date)}
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[11px] text-slate-500 font-medium">
+                            {formatDateTime(tx.date)}
+                          </span>
+                          {onUpdateTransaction && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditDate(tx)}
+                              className="text-amber-700 hover:text-amber-900 text-[10px] font-bold inline-flex items-center gap-0.5 hover:underline"
+                              title="Klik untuk atur tanggal & jam transaksi ini"
+                            >
+                              <Edit2 className="w-2.5 h-2.5" />
+                              <span>Ubah</span>
+                            </button>
+                          )}
                         </div>
                       </td>
 
@@ -1324,14 +1462,27 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
                       {/* Action */}
                       <td className="py-3 px-4 text-center">
-                        <button
-                          onClick={() => onViewReceipt(tx)}
-                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-[#9D6C72] hover:text-white text-slate-700 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-colors"
-                          title="Lihat / Cetak Struk"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Struk</span>
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => onViewReceipt(tx)}
+                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-[#9D6C72] hover:text-white text-slate-700 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-colors"
+                            title="Lihat / Cetak Struk"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Struk</span>
+                          </button>
+
+                          {onUpdateTransaction && (
+                            <button
+                              onClick={() => handleOpenEditDate(tx)}
+                              className="px-2 py-1.5 bg-amber-50 hover:bg-amber-600 hover:text-white text-amber-800 border border-amber-200 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-all"
+                              title="Atur / Ubah Tanggal Transaksi Ini"
+                            >
+                              <Calendar className="w-3.5 h-3.5" />
+                              <span>Ubah Tgl</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
 
                     </tr>
@@ -1343,6 +1494,143 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
       </div>
+
+      {/* Modal Atur/Ubah Tanggal Transaksi */}
+      {editingTxDate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100 space-y-4">
+            
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-amber-100 text-amber-800">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base">Atur Tanggal Transaksi</h3>
+                  <p className="text-xs text-slate-500">Ubah tanggal & waktu untuk transaksi ini</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingTxDate(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Info Transaksi */}
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">No. Transaksi:</span>
+                <span className="font-mono font-bold text-slate-800">{editingTxDate.transactionNumber}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Pelanggan:</span>
+                <span className="font-bold text-slate-800">{editingTxDate.customerName || 'Pelanggan Umum'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Total Belanja:</span>
+                <span className="font-black text-slate-900">{formatRupiah(editingTxDate.total)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Waktu Tercatat:</span>
+                <span className="font-semibold text-slate-700">{formatDateTime(editingTxDate.date)}</span>
+              </div>
+            </div>
+
+            {/* Input Form */}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Pilih Tanggal Baru:
+                </label>
+                <input
+                  type="date"
+                  value={editInputDate}
+                  onChange={(e) => setEditInputDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-2xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Pilih Jam / Waktu Baru:
+                </label>
+                <input
+                  type="time"
+                  value={editInputTime}
+                  onChange={(e) => setEditInputTime(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-2xs"
+                />
+              </div>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[11px] text-slate-400 font-semibold">Pintasan:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    setEditInputDate(toDateInputString(now));
+                    setEditInputTime(toTimeInputString(now));
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                >
+                  ⚡ Hari Ini
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() - 1);
+                    setEditInputDate(toDateInputString(d));
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                >
+                  📅 Kemarin
+                </button>
+              </div>
+            </div>
+
+            {/* Preview of New Indonesian Date */}
+            <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs text-amber-950">
+              <span className="text-[10px] text-amber-700 uppercase font-bold block">Preview Tanggal Baru:</span>
+              <span className="font-bold">
+                {(() => {
+                  try {
+                    const [y, m, d] = editInputDate.split('-').map(Number);
+                    const [hh, mm] = (editInputTime || '12:00').split(':').map(Number);
+                    const dt = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
+                    return formatDateTime(dt.toISOString());
+                  } catch {
+                    return '-';
+                  }
+                })()}
+              </span>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setEditingTxDate(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveDateChange}
+                disabled={!editInputDate}
+                className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 active:scale-95 rounded-xl transition-all shadow-xs disabled:opacity-50"
+              >
+                Simpan Tanggal Baru
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );

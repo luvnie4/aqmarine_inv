@@ -42,11 +42,25 @@ export const generateTransferCode = (): string => {
   return `TRF-${dateCode}-${randomSuffix}`;
 };
 
-export const generateTransactionCode = (): string => {
-  const date = new Date();
-  const dateCode = date.toISOString().slice(2, 10).replace(/-/g, '');
+export const generateTransactionCode = (customDate?: Date | string): string => {
+  const date = customDate ? new Date(customDate) : new Date();
+  const validDate = !isNaN(date.getTime()) ? date : new Date();
+  const dateCode = validDate.toISOString().slice(2, 10).replace(/-/g, '');
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   return `INV-${dateCode}-${randomSuffix}`;
+};
+
+export const toDateInputString = (dateObj: Date = new Date()): string => {
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export const toTimeInputString = (dateObj: Date = new Date()): string => {
+  const hours = String(dateObj.getHours()).padStart(2, '0');
+  const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
 };
 
 export const exportToCSV = (filename: string, headers: string[], rows: (string | number)[][]) => {
