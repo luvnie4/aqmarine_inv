@@ -69,7 +69,7 @@ export interface BazaarEvent {
   createdAt?: string;
 }
 
-export type UserRole = 'owner' | 'admin' | 'gudang' | 'kasir';
+export type UserRole = 'owner' | 'admin' | 'gudang' | 'kasir' | 'superadmin';
 
 export interface UserAccount {
   id: string;
@@ -205,4 +205,4 @@ export interface StockRestock {
   createdAt?: string;
 }
 
-export type ActiveTab = 'dashboard' | 'inventory' | 'sales' | 'pos' | 'transfers' | 'adjustments' | 'reports';
+export type ActiveTab = 'dashboard' | 'inventory' | 'sales' | 'pos' | 'transfers' | 'adjustments' | 'reports' | 'profit_loss';

@@ -25,6 +25,7 @@ import { SalesEntryView } from './components/SalesEntryView';
 import { TransfersView } from './components/TransfersView';
 import { AdjustmentsView } from './components/AdjustmentsView';
 import { ReportsView } from './components/ReportsView';
+import { ProfitLossView } from './components/ProfitLossView';
 import { ProductFormModal } from './components/ProductFormModal';
 import { TransferStockModal } from './components/TransferStockModal';
 import { StockOpnameModal } from './components/StockOpnameModal';
@@ -758,6 +759,14 @@ export function App() {
             products={products}
             onViewReceipt={(tx) => setReceiptTransaction(tx)}
             onUpdateTransaction={handleUpdateTransaction}
+          />
+        )}
+
+        {activeTab === 'profit_loss' && (
+          <ProfitLossView
+            transactions={transactions}
+            products={products}
+            currentUser={currentUser}
           />
         )}
       </main>

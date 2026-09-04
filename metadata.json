@@ -1,6 +1,6 @@
 {
-  "name": "Erteli Gaple Game Pro",
-  "description": "Game Domino Gaple 4 Pemain otentik Indonesia dengan AI cerdas, analisis peluang, efek suara, dan grafis meja premium.",
+  "name": "AQMARINE POS & Inventory",
+  "description": "Sistem Manajemen Stok Butik, Kasir Penjualan Multi-Outlet, dan Perhitungan Laba Rugi AQMARINE",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

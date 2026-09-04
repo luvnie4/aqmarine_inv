@@ -19,7 +19,8 @@ import {
   UserCog,
   Cloud,
   CloudCheck,
-  RefreshCw
+  RefreshCw,
+  Calculator
 } from 'lucide-react';
 import { ActiveTab, Product, UserAccount } from '../types';
 import { BrandLogo } from './BrandLogo';
@@ -81,13 +82,22 @@ export const Navbar: React.FC<NavbarProps> = ({
     highlight?: boolean;
   }
 
+  const isSuperAdmin = 
+    currentUser?.role === 'owner' || 
+    (currentUser?.role as any) === 'superadmin' || 
+    currentUser?.roleLabel?.toLowerCase().includes('super') ||
+    currentUser?.username?.toLowerCase() === 'ceo_owner';
+
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'inventory', label: 'Katalog & Database Stok', icon: Package, badge: products.length },
     { id: 'pos', label: 'Input Penjualan', icon: FileSpreadsheet, highlight: true },
     { id: 'transfers', label: 'Mutasi Stok', icon: ArrowLeftRight },
     { id: 'adjustments', label: 'Stok Opname', icon: ClipboardList },
-    { id: 'reports', label: 'Laporan & Keuangan', icon: BarChart3 },
+    { id: 'reports', label: 'Laporan Penjualan', icon: BarChart3 },
+    ...(isSuperAdmin ? [
+      { id: 'profit_loss' as ActiveTab, label: 'Perhitungan Laba & Rugi', icon: Calculator }
+    ] : []),
   ];
 
   return (
