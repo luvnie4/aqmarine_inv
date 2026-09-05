@@ -13,6 +13,9 @@ export interface Product {
   priceRetail: number;
   priceGrosir: number;
   stockToko: number;
+  initialStock?: number; // Stok awal sebelum pengurangan penjualan berjalan / awal periode audit
+  incomingStock?: number; // Akumulasi stok masuk (restock) dalam periode audit berjalan sebelum stok opname
+  lastOpnameAt?: string; // Waktu terakhir dilakukan reset via Stok Opname
   stockGudang?: number;
   outletStocks?: Record<string, number>;
   minStockAlert: number;

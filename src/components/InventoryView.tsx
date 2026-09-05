@@ -14,9 +14,12 @@ import {
   Image as ImageIcon,
   Eye,
   MapPin,
-  Layers
+  Layers,
+  History,
+  TrendingDown,
+  PackagePlus
 } from 'lucide-react';
-import { Product, StoreOutlet } from '../types';
+import { Product, StoreOutlet, SaleTransaction } from '../types';
 import { formatRupiah, formatNumber, exportToCSV } from '../utils/formatters';
 import { ProductPhotoGalleryModal } from './ProductPhotoGalleryModal';
 import { ImportProductsModal } from './ImportProductsModal';
@@ -25,6 +28,7 @@ import { getOutlets } from '../utils/outletStorage';
 
 interface InventoryViewProps {
   products: Product[];
+  transactions?: SaleTransaction[];
   onOpenAddProduct: () => void;
   onOpenEditProduct: (product: Product) => void;
   onDeleteProduct: (productId: string) => void;
@@ -36,6 +40,7 @@ interface InventoryViewProps {
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
   products,
+  transactions = [],
   onOpenAddProduct,
   onOpenEditProduct,
   onDeleteProduct,
@@ -134,8 +139,73 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     });
   }, [products, searchTerm, selectedCategory, selectedLocationFilter, stockStatusFilter, sortBy, outlets]);
 
+  // Helper to compute comprehensive stock metrics accommodating sales, incoming stock, and initial baseline
+  const getProductStockMetrics = (p: Product) => {
+    const inStock = p.incomingStock || 0;
+    const currentStock = p.stockToko;
+
+    // Calculate actual units sold in transactions (since last opname if any)
+    let txSoldCount = 0;
+    if (transactions && transactions.length > 0) {
+      const lastOpnameTime = p.lastOpnameAt ? new Date(p.lastOpnameAt).getTime() : 0;
+      for (const tx of transactions) {
+        const txTime = new Date(tx.date || tx.createdAt || 0).getTime();
+        if (lastOpnameTime > 0 && txTime < lastOpnameTime) {
+          continue;
+        }
+        if (Array.isArray(tx.items)) {
+          for (const item of tx.items) {
+            const prodId = item.product?.id || item.productId;
+            if (prodId === p.id) {
+              txSoldCount += Number(item.quantity || 0);
+            }
+          }
+        }
+      }
+    }
+
+    // Determine initialStock
+    let initStock: number;
+    if (p.initialStock !== undefined) {
+      initStock = p.initialStock;
+    } else if (txSoldCount > 0 || inStock > 0) {
+      initStock = Math.max(0, currentStock + txSoldCount - inStock);
+    } else {
+      initStock = currentStock;
+    }
+
+    // Determine soldCount:
+    // Ground truth is recorded sales transactions. If transactions empty/legacy, derive from (init + in) - current.
+    let soldCount = txSoldCount;
+    if (soldCount === 0) {
+      const implicitDiff = (initStock + inStock) - currentStock;
+      if (implicitDiff > 0) {
+        soldCount = implicitDiff;
+      }
+    }
+
+    return {
+      initStock,
+      incomingStock: inStock,
+      soldCount,
+      currentStock,
+    };
+  };
+
+  // Precompute metrics map for performance and consistency
+  const metricsMap = useMemo(() => {
+    const map = new Map<string, { initStock: number; incomingStock: number; soldCount: number; currentStock: number }>();
+    for (const p of filteredProducts) {
+      map.set(p.id, getProductStockMetrics(p));
+    }
+    return map;
+  }, [filteredProducts, transactions]);
+
   // Aggregate stats
   const totalStockToko = filteredProducts.reduce((sum, p) => sum + p.stockToko, 0);
+  const totalInitialStock = filteredProducts.reduce((sum, p) => sum + (metricsMap.get(p.id)?.initStock || 0), 0);
+  const totalIncomingStock = filteredProducts.reduce((sum, p) => sum + (metricsMap.get(p.id)?.incomingStock || 0), 0);
+  const totalSold = filteredProducts.reduce((sum, p) => sum + (metricsMap.get(p.id)?.soldCount || 0), 0);
   const totalValuation = filteredProducts.reduce((sum, p) => sum + (p.stockToko * p.hpp), 0);
   const lowStockCount = products.filter(p => p.stockToko <= p.minStockAlert && p.stockToko > 0).length;
   const outOfStockCount = products.filter(p => p.stockToko === 0).length;
@@ -147,26 +217,37 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       'Barcode',
       'Nama Produk',
       'Kategori',
-      'Stok Toko (pcs)',
+      'Stok Awal (pcs)',
+      'Stok Masuk (pcs)',
+      'Terjual (pcs)',
+      'Sisa Stok Toko (pcs)',
       'Batas Min Alert',
       'HPP (Modal)',
       'Harga Jual Toko',
       'Harga Grosir/Reseller',
-      'Total Nilai Aset (HPP)'
+      'Total Nilai Aset (HPP)',
+      'Waktu Opname Terakhir'
     ];
 
-    const rows = filteredProducts.map((p) => [
-      p.sku,
-      p.barcode,
-      p.name,
-      p.category,
-      p.stockToko,
-      p.minStockAlert,
-      p.hpp,
-      p.priceRetail,
-      p.priceGrosir,
-      p.stockToko * p.hpp
-    ]);
+    const rows = filteredProducts.map((p) => {
+      const metrics = metricsMap.get(p.id) || getProductStockMetrics(p);
+      return [
+        p.sku,
+        p.barcode,
+        p.name,
+        p.category,
+        metrics.initStock,
+        metrics.incomingStock,
+        metrics.soldCount,
+        p.stockToko,
+        p.minStockAlert,
+        p.hpp,
+        p.priceRetail,
+        p.priceGrosir,
+        p.stockToko * p.hpp,
+        p.lastOpnameAt ? new Date(p.lastOpnameAt).toLocaleString('id-ID') : '-'
+      ];
+    });
 
     exportToCSV(`Stok_Inventori_Toko_${new Date().toISOString().slice(0, 10)}`, headers, rows);
   };
@@ -221,36 +302,80 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       </div>
 
       {/* Quick Summary Chips for filtered items */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-emerald-50/80 border border-emerald-200/80 p-3.5 rounded-xl">
-          <span className="text-[11px] font-bold text-emerald-800 uppercase block">Total Stok Produk</span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-xl font-black text-emerald-950">{formatNumber(totalStockToko)}</span>
-            <span className="text-xs text-emerald-700">pcs siap jual</span>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {/* Card 1: Stok Awal */}
+        <div className="bg-amber-50/80 border border-amber-200/80 p-3 rounded-xl">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800 uppercase">
+            <History className="w-3.5 h-3.5 text-amber-600" />
+            <span>Stok Awal</span>
           </div>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-lg sm:text-xl font-black text-amber-950">{formatNumber(totalInitialStock)}</span>
+            <span className="text-[11px] text-amber-700 font-medium">pcs</span>
+          </div>
+          <span className="text-[10px] text-amber-700 block mt-0.5">Basis audit / opname</span>
         </div>
 
-        <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
-          <span className="text-[11px] font-bold text-slate-600 uppercase block">Total Nilai Modal (HPP)</span>
-          <div className="text-lg font-black text-slate-900 mt-0.5 truncate">
+        {/* Card 2: Stok Masuk */}
+        <div className="bg-sky-50/80 border border-sky-200/80 p-3 rounded-xl">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-sky-800 uppercase">
+            <PackagePlus className="w-3.5 h-3.5 text-sky-600" />
+            <span>Stok Masuk</span>
+          </div>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-lg sm:text-xl font-black text-sky-950">+{formatNumber(totalIncomingStock)}</span>
+            <span className="text-[11px] text-sky-700 font-medium">pcs</span>
+          </div>
+          <span className="text-[10px] text-sky-700 block mt-0.5">Restock berjalan</span>
+        </div>
+
+        {/* Card 3: Terjual (Kuantitas angka, tanpa persentase) */}
+        <div className="bg-rose-50/80 border border-rose-200/80 p-3 rounded-xl">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-800 uppercase">
+            <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
+            <span>Terjual</span>
+          </div>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-lg sm:text-xl font-black text-rose-950">{formatNumber(totalSold)}</span>
+            <span className="text-[11px] text-rose-700 font-medium">pcs laku</span>
+          </div>
+          <span className="text-[10px] text-rose-700 block mt-0.5">Total unit terjual</span>
+        </div>
+
+        {/* Card 4: Sisa Stok Toko */}
+        <div className="bg-emerald-50/80 border border-emerald-200/80 p-3 rounded-xl">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 uppercase">
+            <Store className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Sisa Stok Toko</span>
+          </div>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-lg sm:text-xl font-black text-emerald-950">{formatNumber(totalStockToko)}</span>
+            <span className="text-[11px] text-emerald-700 font-medium">pcs fisik</span>
+          </div>
+          <span className="text-[10px] text-emerald-700 block mt-0.5">Kondisi saat ini</span>
+        </div>
+
+        {/* Card 5: Total Nilai HPP */}
+        <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+          <span className="text-[11px] font-bold text-slate-600 uppercase block">Total Nilai HPP</span>
+          <div className="text-base sm:text-lg font-black text-slate-900 mt-1 truncate">
             {formatRupiah(totalValuation)}
           </div>
+          <span className="text-[10px] text-slate-500 block mt-0.5">Aset stok fisik</span>
         </div>
 
-        <div className="bg-rose-50/80 border border-rose-200/80 p-3.5 rounded-xl">
-          <span className="text-[11px] font-bold text-rose-800 uppercase block">Stok Menipis (Alert)</span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-xl font-black text-rose-950">{lowStockCount}</span>
-            <span className="text-xs text-rose-700">model produk</span>
+        {/* Card 6: Peringatan Stok */}
+        <div className="bg-amber-50/60 border border-amber-200/80 p-3 rounded-xl">
+          <span className="text-[11px] font-bold text-amber-900 uppercase block">Peringatan Stok</span>
+          <div className="flex items-center gap-1.5 mt-1">
+            <span className="text-xs font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-md">
+              {lowStockCount} Menipis
+            </span>
+            <span className="text-xs font-bold text-red-800 bg-red-100 px-2 py-0.5 rounded-md">
+              {outOfStockCount} Habis
+            </span>
           </div>
-        </div>
-
-        <div className="bg-red-50/80 border border-red-200/80 p-3.5 rounded-xl">
-          <span className="text-[11px] font-bold text-red-800 uppercase block">Stok Habis Total</span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-xl font-black text-red-950">{outOfStockCount}</span>
-            <span className="text-xs text-red-700">model kosong</span>
-          </div>
+          <span className="text-[10px] text-slate-500 block mt-0.5">Perlu restock</span>
         </div>
       </div>
 
@@ -444,9 +569,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <tr>
                   <th className="py-3.5 px-4">Nama Produk</th>
                   <th className="py-3.5 px-3">Kategori</th>
-                  <th className="py-3.5 px-3 text-center">
-                    <span className="inline-flex items-center gap-1 text-emerald-800">
-                      <Store className="w-3.5 h-3.5" /> Stok di Toko
+                  <th className="py-3.5 px-3 text-center bg-amber-50/50 text-amber-900 font-black">
+                    <span className="inline-flex items-center gap-1">
+                      <History className="w-3.5 h-3.5 text-amber-600" /> Stok Awal
+                    </span>
+                  </th>
+                  <th className="py-3.5 px-3 text-center bg-sky-50/50 text-sky-900 font-black">
+                    <span className="inline-flex items-center gap-1">
+                      <PackagePlus className="w-3.5 h-3.5 text-sky-600" /> Stok Masuk
+                    </span>
+                  </th>
+                  <th className="py-3.5 px-3 text-center bg-rose-50/50 text-rose-900 font-black">
+                    <span className="inline-flex items-center gap-1">
+                      <TrendingDown className="w-3.5 h-3.5 text-rose-600" /> Terjual
+                    </span>
+                  </th>
+                  <th className="py-3.5 px-3 text-center bg-emerald-50/70 text-emerald-950 font-black">
+                    <span className="inline-flex items-center gap-1">
+                      <Store className="w-3.5 h-3.5 text-emerald-700" /> Sisa Stok Toko
                     </span>
                   </th>
                   <th className="py-3.5 px-3 text-center">Status Stok</th>
@@ -457,7 +597,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {filteredProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-400">
+                    <td colSpan={9} className="py-12 text-center text-slate-400">
                       <p className="font-semibold text-sm">Tidak ada produk yang cocok dengan pencarian.</p>
                       <p className="text-xs mt-1">Coba atur ulang kata kunci atau filter status.</p>
                     </td>
@@ -469,6 +609,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       : p.stockToko;
                     const isLow = currentDisplayStock <= p.minStockAlert && currentDisplayStock > 0;
                     const isOut = currentDisplayStock === 0;
+                    const metrics = metricsMap.get(p.id) || getProductStockMetrics(p);
 
                     return (
                       <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
@@ -499,7 +640,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
                                 <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-[10px] font-bold text-slate-700">{p.sku}</span>
                                 {p.notes && (
-                                  <span className="text-[11px] text-slate-400 truncate max-w-[180px]">• {p.notes}</span>
+                                   <span className="text-[11px] text-slate-400 truncate max-w-[180px]">• {p.notes}</span>
                                 )}
                               </div>
                             </div>
@@ -515,8 +656,66 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           </span>
                         </td>
 
-                        {/* Column 3: Stock at Store */}
-                        <td className="py-3.5 px-3 text-center">
+                        {/* Column 3: Stok Awal (Baseline Opname / Input Awal) */}
+                        <td className="py-3.5 px-3 text-center bg-amber-50/20">
+                          <div className="inline-flex flex-col items-center">
+                            <span className="px-2.5 py-1 rounded-xl font-black text-xs bg-amber-100/80 text-amber-950 border border-amber-200 font-mono">
+                              {metrics.initStock} {p.unit}
+                            </span>
+                            {p.lastOpnameAt ? (
+                              <span className="text-[9px] text-amber-800 font-semibold mt-0.5" title={`Terakhir opname: ${new Date(p.lastOpnameAt).toLocaleString('id-ID')}`}>
+                                Audit Opname
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-slate-400 font-medium mt-0.5">
+                                Awal Periode
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Column 4: Stok Masuk (Restock Berjalan) */}
+                        <td className="py-3.5 px-3 text-center bg-sky-50/20">
+                          {metrics.incomingStock > 0 ? (
+                            <div className="inline-flex flex-col items-center">
+                              <span className="px-2 py-0.5 rounded-lg font-bold text-xs bg-sky-100 text-sky-900 border border-sky-200 font-mono inline-flex items-center gap-0.5">
+                                <PackagePlus className="w-3 h-3 text-sky-600" />
+                                +{metrics.incomingStock} {p.unit}
+                              </span>
+                              <span className="text-[9px] text-sky-700 font-medium mt-0.5">
+                                Restock Masuk
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="inline-flex flex-col items-center">
+                              <span className="text-slate-300 font-mono text-xs">0 {p.unit}</span>
+                              <span className="text-[9px] text-slate-400 mt-0.5">-</span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Column 5: Terjual (Kuantitas angka, tanpa persentase) */}
+                        <td className="py-3.5 px-3 text-center bg-rose-50/10">
+                          {metrics.soldCount > 0 ? (
+                            <div className="inline-flex flex-col items-center">
+                              <span className="px-2.5 py-1 rounded-lg font-black text-xs bg-rose-50 text-rose-700 border border-rose-200 font-mono inline-flex items-center gap-1">
+                                <TrendingDown className="w-3 h-3 text-rose-500" />
+                                {metrics.soldCount} {p.unit}
+                              </span>
+                              <span className="text-[9px] text-rose-600 font-semibold mt-0.5">
+                                Terjual
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="inline-flex flex-col items-center">
+                              <span className="text-slate-300 font-mono text-xs font-bold">0 {p.unit}</span>
+                              <span className="text-[9px] text-slate-400 mt-0.5">Belum laku</span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Column 6: Sisa Stok di Toko */}
+                        <td className="py-3.5 px-3 text-center bg-emerald-50/20">
                           {selectedLocationFilter !== 'all' ? (
                             // Specific outlet selected
                             (() => {
@@ -548,7 +747,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                   ? 'bg-red-100 text-red-900 border border-red-300'
                                   : isLow 
                                   ? 'bg-rose-100 text-rose-900 border border-rose-300' 
-                                  : 'bg-emerald-50 text-emerald-900'
+                                  : 'bg-emerald-100 text-emerald-950 font-black border border-emerald-200'
                               }`}>
                                 {p.stockToko} {p.unit}
                               </span>
@@ -757,8 +956,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-bold text-slate-700">
                           {selectedLocationFilter !== 'all'
-                            ? `Stok di ${outlets.find(o => o.id === selectedLocationFilter)?.name || 'Toko'}:`
-                            : 'Total Stok Toko:'}
+                            ? `Sisa di ${outlets.find(o => o.id === selectedLocationFilter)?.name || 'Toko'}:`
+                            : 'Sisa Stok Fisik:'}
                         </span>
                         <span className={`text-sm font-black px-2.5 py-0.5 rounded-lg border ${
                           isOut
@@ -770,6 +969,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           {currentStock} {p.unit}
                         </span>
                       </div>
+
+                      {/* Initial Stock, Incoming Stock, Sold breakdown (3 Columns) */}
+                      {(() => {
+                        const metrics = metricsMap.get(p.id) || getProductStockMetrics(p);
+                        return (
+                          <div className="grid grid-cols-3 gap-1.5 pt-1.5 border-t border-slate-200/60 text-[10px]">
+                            <div className="bg-amber-50/80 border border-amber-200/60 rounded-lg p-1.5 text-center">
+                              <span className="text-slate-400 block text-[9px] font-semibold">Awal</span>
+                              <span className="font-bold text-amber-900">{metrics.initStock} {p.unit}</span>
+                            </div>
+                            <div className="bg-sky-50/80 border border-sky-200/60 rounded-lg p-1.5 text-center">
+                              <span className="text-slate-400 block text-[9px] font-semibold">Masuk</span>
+                              <span className="font-bold text-sky-900">
+                                {metrics.incomingStock > 0 ? `+${metrics.incomingStock}` : '0'} {p.unit}
+                              </span>
+                            </div>
+                            <div className="bg-rose-50/80 border border-rose-200/60 rounded-lg p-1.5 text-center">
+                              <span className="text-slate-400 block text-[9px] font-semibold">Terjual</span>
+                              <span className="font-bold text-rose-800">
+                                {metrics.soldCount} {p.unit}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Outlet pills when viewing all stores and multiple outlets exist */}
                       {selectedLocationFilter === 'all' && outlets.length > 1 && (

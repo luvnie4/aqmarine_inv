@@ -133,6 +133,8 @@ export const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
           priceRetail,
           priceGrosir,
           stockToko,
+          initialStock: stockToko,
+          incomingStock: 0,
           outletStocks: { [defaultOutletId]: stockToko },
           minStockAlert: minAlert,
           unit,

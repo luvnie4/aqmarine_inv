@@ -241,6 +241,17 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
             </span>
           </div>
 
+          {/* Reset Info Note */}
+          <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 flex items-start gap-2">
+            <span className="text-sm shrink-0">🔄</span>
+            <div>
+              <span className="font-bold block">Reset Stok Awal Otomatis:</span>
+              <span>
+                Menyimpan hasil Stok Opname ini akan otomatis memperbarui <strong>Stok Awal</strong> produk ke angka aktual fisik ({typeof actualStock === 'number' ? actualStock : 0} pcs) sebagai titik awal audit periode baru.
+              </span>
+            </div>
+          </div>
+
           {/* Reason */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-700 block">

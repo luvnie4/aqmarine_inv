@@ -269,6 +269,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       priceRetail: Number(priceRetail) || 0,
       priceGrosir: Number(priceGrosir) || 0,
       stockToko: calculatedTotalStockToko,
+      initialStock: productToEdit?.initialStock !== undefined 
+        ? productToEdit.initialStock 
+        : calculatedTotalStockToko,
+      incomingStock: productToEdit?.incomingStock || 0,
+      lastOpnameAt: productToEdit?.lastOpnameAt,
       outletStocks: finalOutletStocks,
       minStockAlert: Number(minStockAlert) || 5,
       unit: unit.trim() || (category === 'Hijab' ? 'Pcs' : 'Set'),

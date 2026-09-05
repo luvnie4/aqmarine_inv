@@ -62,6 +62,7 @@ export const COLLECTIONS = {
   TRANSACTIONS: 'transactions',
   TRANSFERS: 'transfers',
   ADJUSTMENTS: 'adjustments',
+  RESTOCKS: 'restocks',
   OUTLETS: 'outlets',
   CHANNELS: 'salesChannels',
   BAZAARS: 'bazaars',

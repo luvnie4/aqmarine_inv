@@ -56,6 +56,7 @@ const STORAGE_KEYS = {
   TRANSFERS: 'aqmarine_boutique_transfers_v1',
   TRANSACTIONS: 'aqmarine_boutique_transactions_v1',
   ADJUSTMENTS: 'aqmarine_boutique_adjustments_v1',
+  RESTOCKS: 'aqmarine_boutique_restocks_v1',
   ACTIVE_TAB: 'aqmarine_boutique_active_tab_v1',
 };
 
@@ -112,6 +113,15 @@ export function App() {
       return localData ? JSON.parse(localData) : INITIAL_ADJUSTMENTS;
     } catch {
       return INITIAL_ADJUSTMENTS;
+    }
+  });
+
+  const [restocks, setRestocks] = useState<StockRestock[]>(() => {
+    try {
+      const localData = localStorage.getItem(STORAGE_KEYS.RESTOCKS);
+      return localData ? JSON.parse(localData) : [];
+    } catch {
+      return [];
     }
   });
 
@@ -212,6 +222,25 @@ export function App() {
       },
       (error) => {
         console.warn('Firestore adjustments listener error:', error);
+      }
+    );
+
+    // Subscribe to Restocks
+    const unsubRestocks = onSnapshot(
+      collection(db, COLLECTIONS.RESTOCKS),
+      (snap) => {
+        if (!snap.empty) {
+          const cloudRestocks: StockRestock[] = [];
+          snap.forEach((docSnap) => {
+            cloudRestocks.push(docSnap.data() as StockRestock);
+          });
+          cloudRestocks.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setRestocks(cloudRestocks);
+          localStorage.setItem(STORAGE_KEYS.RESTOCKS, JSON.stringify(cloudRestocks));
+        }
+      },
+      (error) => {
+        console.warn('Firestore restocks listener error:', error);
       }
     );
 
@@ -446,8 +475,9 @@ export function App() {
     setInitialTransferProductId(undefined);
   };
 
-  // Stock Opname / Adjustment Operation
+  // Stock Opname / Adjustment Operation (Reset ke Stok Aktual Fisik)
   const handleConfirmAdjustment = (adjustment: StockAdjustment) => {
+    const nowIso = new Date().toISOString();
     const updatedProducts = products.map((p) => {
       if (p.id !== adjustment.productId) return p;
 
@@ -466,8 +496,12 @@ export function App() {
       return {
         ...p,
         stockToko: totalToko,
+        // Reset stok awal ke stok aktual hasil opname fisik agar siklus audit baru dimulai dari sini
+        initialStock: totalToko,
+        incomingStock: 0,
+        lastOpnameAt: nowIso,
         outletStocks,
-        updatedAt: new Date().toISOString(),
+        updatedAt: nowIso,
       };
     });
 
@@ -505,10 +539,17 @@ export function App() {
 
       const totalToko = Object.values(outletStocks).reduce((a: number, b: number) => a + b, 0);
 
+      // Baseline stok awal tidak boleh tertimpa saat ada stok masuk baru di bulan yang sama!
+      // Stok awal tetap menjadi titik awal periode (atau opname terakhir)
+      const baseInitial = p.initialStock !== undefined ? p.initialStock : p.stockToko;
+      const newIncomingStock = (p.incomingStock || 0) + qty;
+
       return {
         ...p,
         hpp: updateHpp && restock.purchasePrice ? restock.purchasePrice : p.hpp,
         stockToko: totalToko,
+        initialStock: baseInitial,
+        incomingStock: newIncomingStock,
         outletStocks,
         updatedAt: new Date().toISOString(),
       };
@@ -521,6 +562,11 @@ export function App() {
     if (affectedProd) {
       saveDocToFirestore(COLLECTIONS.PRODUCTS, affectedProd).catch(console.warn);
     }
+
+    const updatedRestocks = [restock, ...restocks];
+    setRestocks(updatedRestocks);
+    localStorage.setItem(STORAGE_KEYS.RESTOCKS, JSON.stringify(updatedRestocks));
+    saveDocToFirestore(COLLECTIONS.RESTOCKS, restock).catch(console.warn);
 
     setIsRestockModalOpen(false);
     setInitialRestockProductId(undefined);
@@ -590,6 +636,9 @@ export function App() {
 
       // Sync adjustments
       await syncCollectionToFirestore(COLLECTIONS.ADJUSTMENTS, adjustments);
+
+      // Sync restocks
+      await syncCollectionToFirestore(COLLECTIONS.RESTOCKS, restocks);
 
       // Sync Bazaars (clean from dummies)
       const currentBazaars = filterOutDummyBazaars(getBazaarEvents());
@@ -695,6 +744,7 @@ export function App() {
         {activeTab === 'inventory' && (
           <InventoryView
             products={products}
+            transactions={transactions}
             onOpenAddProduct={() => {
               setEditingProduct(null);
               setIsAddProductOpen(true);
