@@ -33,7 +33,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   const handleShareWhatsApp = () => {
     const itemsText = transaction.items
-      .map((i, idx) => `${idx + 1}. *${i.productName}*\n   ${i.quantity} pcs x ${formatRupiah(i.price)} = ${formatRupiah(i.subtotal)}`)
+      .map((i, idx) => {
+        const name = i.productName || (i as any).product?.name || (i as any).name || 'Produk';
+        const unitPrice = i.price ?? (i as any).unitPrice ?? (i as any).product?.priceRetail ?? 0;
+        return `${idx + 1}. *${name}*\n   ${i.quantity} pcs x ${formatRupiah(unitPrice)} = ${formatRupiah(i.subtotal)}`;
+      })
       .join('\n');
 
     const channelText = transaction.bazaarName 
@@ -144,11 +148,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             {transaction.items.map((item, idx) => (
               <div key={idx} className="space-y-0.5">
                 <div className="font-sans font-bold text-slate-800 text-[11px]">
-                  {item.productName}
+                  {item.productName || (item as any).product?.name || (item as any).name || 'Produk'}
                 </div>
                 <div className="flex justify-between text-[11px] text-slate-600">
                   <span>
-                    {item.quantity} x {formatRupiah(item.price)}
+                    {item.quantity} x {formatRupiah(item.price ?? (item as any).unitPrice ?? (item as any).product?.priceRetail ?? 0)}
                   </span>
                   <span className="font-bold text-slate-900">{formatRupiah(item.subtotal)}</span>
                 </div>

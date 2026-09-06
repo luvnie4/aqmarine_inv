@@ -60,6 +60,102 @@ const STORAGE_KEYS = {
   ACTIVE_TAB: 'aqmarine_boutique_active_tab_v1',
 };
 
+// Safe normalizer to prevent any undefined product names, categories, or prices in transactions
+export function normalizeTransactionRecord(tx: SaleTransaction, availableProducts: Product[] = []): SaleTransaction {
+  if (!tx || !Array.isArray(tx.items)) return tx;
+
+  const normalizedItems = tx.items.map((item: any, idx: number) => {
+    const prodRef = item.product || {};
+    const candidateId = item.productId || prodRef.id || item.id;
+    const candidateSku = item.sku || prodRef.sku;
+    const matched = availableProducts.find(
+      (p) => (candidateId && p.id === candidateId) || (candidateSku && p.sku === candidateSku)
+    );
+
+    const productName =
+      (item.productName && item.productName !== 'undefined' ? item.productName : null) ||
+      (prodRef.name && prodRef.name !== 'undefined' ? prodRef.name : null) ||
+      (item.name && item.name !== 'undefined' ? item.name : null) ||
+      matched?.name ||
+      (item.category && item.category !== 'Lainnya' ? `Item ${item.category}` : `Produk ${idx + 1}`);
+
+    const sku = item.sku || prodRef.sku || matched?.sku || '-';
+
+    let category = item.category || prodRef.category || matched?.category;
+    if (!category || category === 'Lainnya' || category === 'Umum') {
+      const lower = (productName || '').toLowerCase();
+      const skuLower = (sku || '').toLowerCase();
+      if (lower.includes('mukena') || skuLower.includes('mkn')) {
+        category = 'Mukena';
+      } else if (
+        lower.includes('hijab') ||
+        lower.includes('pashmina') ||
+        lower.includes('voal') ||
+        lower.includes('paris') ||
+        lower.includes("syar'i") ||
+        skuLower.includes('hjb')
+      ) {
+        category = 'Hijab';
+      } else if (lower.includes('gamis') || skuLower.includes('gms')) {
+        category = 'Gamis';
+      } else {
+        category = category || 'Lainnya';
+      }
+    }
+
+    const unitPrice = Number(item.unitPrice ?? item.price ?? prodRef.priceRetail ?? matched?.priceRetail ?? 0);
+    const quantity = Math.max(1, Number(item.quantity || 1));
+    const discountAmount = Number(item.discountAmount || 0);
+    const subtotal = Number(item.subtotal ?? Math.max(0, quantity * unitPrice - discountAmount));
+    const hpp = Number(item.hpp ?? prodRef.hpp ?? matched?.hpp ?? 0);
+    const unit = item.unit || prodRef.unit || matched?.unit || 'pcs';
+
+    const fullProduct = matched || {
+      id: candidateId || `prod-${idx}`,
+      sku,
+      barcode: '',
+      name: productName,
+      category,
+      hpp,
+      priceRetail: unitPrice,
+      priceGrosir: unitPrice,
+      stockToko: 0,
+      minStockAlert: 5,
+      unit,
+    };
+
+    return {
+      ...item,
+      productId: candidateId || fullProduct.id,
+      productName,
+      name: productName,
+      sku,
+      category,
+      unitPrice,
+      price: unitPrice,
+      appliedPrice: unitPrice,
+      quantity,
+      discountAmount,
+      subtotal,
+      hpp,
+      unit,
+      product: fullProduct,
+    };
+  });
+
+  const total = Number(tx.total ?? tx.grandTotal ?? 0);
+  const discount = Number(tx.discount ?? tx.discountTotal ?? 0);
+
+  return {
+    ...tx,
+    items: normalizedItems,
+    total,
+    grandTotal: total,
+    discount,
+    discountTotal: discount,
+  };
+}
+
 export function App() {
   // Authentication State
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
@@ -101,9 +197,10 @@ export function App() {
   const [transactions, setTransactions] = useState<SaleTransaction[]>(() => {
     try {
       const localData = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
-      return localData ? JSON.parse(localData) : INITIAL_TRANSACTIONS;
+      const raw = localData ? JSON.parse(localData) : INITIAL_TRANSACTIONS;
+      return (raw || []).map((t: SaleTransaction) => normalizeTransactionRecord(t, INITIAL_PRODUCTS));
     } catch {
-      return INITIAL_TRANSACTIONS;
+      return INITIAL_TRANSACTIONS.map((t) => normalizeTransactionRecord(t, INITIAL_PRODUCTS));
     }
   });
 
@@ -178,8 +275,9 @@ export function App() {
             cloudTransactions.push(docSnap.data() as SaleTransaction);
           });
           cloudTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setTransactions(cloudTransactions);
-          localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(cloudTransactions));
+          const normalizedCloud = cloudTransactions.map((t) => normalizeTransactionRecord(t, products));
+          setTransactions(normalizedCloud);
+          localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(normalizedCloud));
         }
       },
       (error) => {
@@ -611,13 +709,85 @@ export function App() {
     setReceiptTransaction(tx);
   };
 
-  // Update Existing Transaction (e.g. adjust transaction date)
+  // Auto-heal existing transactions when products change
+  useEffect(() => {
+    if (!transactions.length || !products.length) return;
+    let needsHeal = false;
+    for (const tx of transactions) {
+      if (tx.items?.some((i: any) => !i.productName || i.productName === 'undefined' || !i.category || i.category === 'Lainnya')) {
+        needsHeal = true;
+        break;
+      }
+    }
+    if (needsHeal) {
+      const healed = transactions.map((t) => normalizeTransactionRecord(t, products));
+      setTransactions(healed);
+      localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(healed));
+      healed.forEach((tx) => {
+        saveDocToFirestore(COLLECTIONS.TRANSACTIONS, tx).catch(() => {});
+      });
+    }
+  }, [products]);
+
+  // Update Existing Transaction (Full Edit Data Transaksi)
   const handleUpdateTransaction = (updatedTx: SaleTransaction) => {
-    const updated = transactions.map((t) => (t.id === updatedTx.id ? updatedTx : t));
+    const oldTx = transactions.find((t) => t.id === updatedTx.id);
+
+    // If stock deduction is involved, adjust product stocks accordingly
+    if (oldTx) {
+      const oldOutletId = oldTx.stockDeductedOutletId || oldTx.outletId || 'outlet-main';
+      const newOutletId = updatedTx.stockDeductedOutletId || updatedTx.outletId || 'outlet-main';
+
+      const updatedProducts = products.map((p) => {
+        let outletStocks = { ...(p.outletStocks || {}) };
+        let modified = false;
+
+        // Revert old item quantity
+        const oldItem = oldTx.items?.find((i: any) => (i.product?.id || i.productId) === p.id);
+        if (oldItem) {
+          outletStocks[oldOutletId] = (outletStocks[oldOutletId] || 0) + (oldItem.quantity || 0);
+          modified = true;
+        }
+
+        // Apply new item quantity deduction
+        const newItem = updatedTx.items?.find((i: any) => (i.product?.id || i.productId) === p.id);
+        if (newItem) {
+          outletStocks[newOutletId] = Math.max(0, (outletStocks[newOutletId] || 0) - (newItem.quantity || 0));
+          modified = true;
+        }
+
+        if (!modified) return p;
+
+        const totalToko = Object.values(outletStocks).reduce((a: number, b: number) => a + b, 0);
+        return {
+          ...p,
+          stockToko: totalToko,
+          outletStocks,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+
+      setProducts(updatedProducts);
+      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+
+      // Save affected products to Firestore
+      const touchedProductIds = new Set<string>();
+      oldTx.items?.forEach((i: any) => touchedProductIds.add(i.product?.id || i.productId));
+      updatedTx.items?.forEach((i: any) => touchedProductIds.add(i.product?.id || i.productId));
+      touchedProductIds.forEach((prodId) => {
+        const prod = updatedProducts.find((p) => p.id === prodId);
+        if (prod) {
+          saveDocToFirestore(COLLECTIONS.PRODUCTS, prod).catch(console.warn);
+        }
+      });
+    }
+
+    const normalizedTx = normalizeTransactionRecord(updatedTx, products);
+    const updated = transactions.map((t) => (t.id === normalizedTx.id ? normalizedTx : t));
     updated.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     setTransactions(updated);
     localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updated));
-    saveDocToFirestore(COLLECTIONS.TRANSACTIONS, updatedTx).catch(console.warn);
+    saveDocToFirestore(COLLECTIONS.TRANSACTIONS, normalizedTx).catch(console.warn);
   };
 
   // Force Push & Sync All Data to Firestore (Bazaar, Outlets, Channels, Products, Users, etc.)

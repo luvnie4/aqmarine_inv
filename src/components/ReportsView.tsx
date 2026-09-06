@@ -24,12 +24,14 @@ import {
   Edit2,
   Clock,
   RotateCcw,
-  X
+  X,
+  FileEdit
 } from 'lucide-react';
 import { SaleTransaction, Product } from '../types';
 import { formatRupiah, formatDateTime, exportToCSV, toDateInputString, toTimeInputString } from '../utils/formatters';
 import { getOutlets } from '../utils/outletStorage';
 import { getBazaarEvents } from '../utils/bazaarStorage';
+import { EditTransactionModal } from './EditTransactionModal';
 
 interface ReportsViewProps {
   transactions: SaleTransaction[];
@@ -66,42 +68,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   // Category Filter: 'all' | 'Hijab' | 'Mukena' | 'Lainnya'
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
-  // Edit Transaction Date State
-  const [editingTxDate, setEditingTxDate] = useState<SaleTransaction | null>(null);
-  const [editInputDate, setEditInputDate] = useState<string>('');
-  const [editInputTime, setEditInputTime] = useState<string>('');
+  // Edit Transaction State (Full Edit Data Transaksi)
+  const [editingTransaction, setEditingTransaction] = useState<SaleTransaction | null>(null);
   const [editSuccessMsg, setEditSuccessMsg] = useState<string | null>(null);
 
-  const handleOpenEditDate = (tx: SaleTransaction) => {
-    setEditingTxDate(tx);
-    const txDate = tx.date ? new Date(tx.date) : new Date();
-    setEditInputDate(toDateInputString(!isNaN(txDate.getTime()) ? txDate : new Date()));
-    setEditInputTime(toTimeInputString(!isNaN(txDate.getTime()) ? txDate : new Date()));
+  const handleOpenEditTransaction = (tx: SaleTransaction) => {
+    setEditingTransaction(tx);
   };
 
-  const handleSaveDateChange = () => {
-    if (!editingTxDate || !editInputDate) return;
-    try {
-      const [y, m, d] = editInputDate.split('-').map(Number);
-      const [hh, mm] = (editInputTime || '12:00').split(':').map(Number);
-      const newDateObj = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
-      const newIso = !isNaN(newDateObj.getTime()) ? newDateObj.toISOString() : editingTxDate.date;
-      
-      const updatedTx: SaleTransaction = {
-        ...editingTxDate,
-        date: newIso,
-      };
-
-      if (onUpdateTransaction) {
-        onUpdateTransaction(updatedTx);
-      }
-
-      setEditSuccessMsg(`Tanggal transaksi ${editingTxDate.transactionNumber} berhasil diperbarui!`);
-      setTimeout(() => setEditSuccessMsg(null), 3500);
-      setEditingTxDate(null);
-    } catch (e) {
-      console.error(e);
+  const handleSaveTransaction = (updatedTx: SaleTransaction) => {
+    if (onUpdateTransaction) {
+      onUpdateTransaction(updatedTx);
     }
+    setEditSuccessMsg(`Data transaksi ${updatedTx.transactionNumber} berhasil diperbarui!`);
+    setTimeout(() => setEditSuccessMsg(null), 3500);
+    setEditingTransaction(null);
   };
 
   const outlets = useMemo(() => getOutlets(), []);
@@ -118,12 +99,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   // Helper to determine item category
   const getItemCategory = (item: any): string => {
-    if (item.category) return item.category;
-    if (productCategoryMap[item.productId]) return productCategoryMap[item.productId];
-    const nameLower = (item.productName || '').toLowerCase();
-    const skuLower = (item.sku || '').toLowerCase();
+    if (item.category && item.category !== 'Lainnya' && item.category !== 'Umum') return item.category;
+    if (item.product?.category && item.product.category !== 'Lainnya') return item.product.category;
+    const pId = item.productId || item.product?.id;
+    if (pId && productCategoryMap[pId]) return productCategoryMap[pId];
+    const nameLower = (item.productName || item.product?.name || item.name || '').toLowerCase();
+    const skuLower = (item.sku || item.product?.sku || '').toLowerCase();
     if (nameLower.includes('mukena') || skuLower.includes('mkn')) return 'Mukena';
-    if (nameLower.includes('hijab') || nameLower.includes('pashmina') || nameLower.includes('voal') || skuLower.includes('hjb')) return 'Hijab';
+    if (
+      nameLower.includes('hijab') ||
+      nameLower.includes('pashmina') ||
+      nameLower.includes('voal') ||
+      nameLower.includes('paris') ||
+      nameLower.includes("syar'i") ||
+      skuLower.includes('hjb')
+    ) {
+      return 'Hijab';
+    }
+    if (nameLower.includes('gamis') || skuLower.includes('gms')) return 'Gamis';
+    if (item.category) return item.category;
     return 'Lainnya';
   };
 
@@ -252,7 +246,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         (tx.bazaarName && tx.bazaarName.toLowerCase().includes(query)) ||
         (tx.outletName && tx.outletName.toLowerCase().includes(query)) ||
         (tx.salesChannelName && tx.salesChannelName.toLowerCase().includes(query)) ||
-        tx.items.some((i) => i.productName?.toLowerCase().includes(query) || i.sku?.toLowerCase().includes(query));
+        tx.items.some((i) => {
+          const name = (i.productName || i.product?.name || i.name || '').toLowerCase();
+          const sku = (i.sku || i.product?.sku || '').toLowerCase();
+          return name.includes(query) || sku.includes(query);
+        });
 
       return matchSearch;
     });
@@ -425,7 +423,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         channelType === 'bazaar' ? (tx.bazaarName || 'Event Bazaar') :
         channelType === 'whatsapp' ? 'Online WA' : (tx.customChannelName || '-');
 
-      const itemsDetail = tx.items.map(i => `${i.productName} (${i.quantity || 1} pcs)`).join('; ');
+      const itemsDetail = tx.items.map(i => `${i.productName || i.product?.name || i.name || 'Produk'} (${i.quantity || 1} pcs)`).join('; ');
 
       return [
         tx.transactionNumber,
@@ -1367,12 +1365,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           {onUpdateTransaction && (
                             <button
                               type="button"
-                              onClick={() => handleOpenEditDate(tx)}
+                              onClick={() => handleOpenEditTransaction(tx)}
                               className="text-amber-700 hover:text-amber-900 text-[10px] font-bold inline-flex items-center gap-0.5 hover:underline"
-                              title="Klik untuk atur tanggal & jam transaksi ini"
+                              title="Klik untuk edit seluruh data transaksi ini"
                             >
                               <Edit2 className="w-2.5 h-2.5" />
-                              <span>Ubah</span>
+                              <span>Ubah Data</span>
                             </button>
                           )}
                         </div>
@@ -1418,9 +1416,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           {/* Product Titles Snippet */}
                           <div 
                             className="text-[11px] text-slate-600 max-w-[260px] truncate" 
-                            title={tx.items.map(i => `${i.productName} (${i.quantity || 1} pcs)`).join(', ')}
+                            title={tx.items.map(i => `${i.productName || i.product?.name || i.name || 'Produk'} (${i.quantity || 1} pcs)`).join(', ')}
                           >
-                            {tx.items.map(i => `${i.productName} (${i.quantity || 1})`).join(', ')}
+                            {tx.items.map(i => `${i.productName || i.product?.name || i.name || 'Produk'} (${i.quantity || 1})`).join(', ')}
                           </div>
                         </div>
                       </td>
@@ -1474,12 +1472,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
                           {onUpdateTransaction && (
                             <button
-                              onClick={() => handleOpenEditDate(tx)}
+                              onClick={() => handleOpenEditTransaction(tx)}
                               className="px-2 py-1.5 bg-amber-50 hover:bg-amber-600 hover:text-white text-amber-800 border border-amber-200 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-all"
-                              title="Atur / Ubah Tanggal Transaksi Ini"
+                              title="Edit Seluruh Data Transaksi Ini"
                             >
-                              <Calendar className="w-3.5 h-3.5" />
-                              <span>Ubah Tgl</span>
+                              <FileEdit className="w-3.5 h-3.5" />
+                              <span>Edit Data</span>
                             </button>
                           )}
                         </div>
@@ -1495,142 +1493,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       </div>
 
-      {/* Modal Atur/Ubah Tanggal Transaksi */}
-      {editingTxDate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100 space-y-4">
-            
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-amber-100 text-amber-800">
-                  <Calendar className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-black text-slate-900 text-base">Atur Tanggal Transaksi</h3>
-                  <p className="text-xs text-slate-500">Ubah tanggal & waktu untuk transaksi ini</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setEditingTxDate(null)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Info Transaksi */}
-            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1.5 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">No. Transaksi:</span>
-                <span className="font-mono font-bold text-slate-800">{editingTxDate.transactionNumber}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Pelanggan:</span>
-                <span className="font-bold text-slate-800">{editingTxDate.customerName || 'Pelanggan Umum'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Total Belanja:</span>
-                <span className="font-black text-slate-900">{formatRupiah(editingTxDate.total)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Waktu Tercatat:</span>
-                <span className="font-semibold text-slate-700">{formatDateTime(editingTxDate.date)}</span>
-              </div>
-            </div>
-
-            {/* Input Form */}
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Pilih Tanggal Baru:
-                </label>
-                <input
-                  type="date"
-                  value={editInputDate}
-                  onChange={(e) => setEditInputDate(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-2xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Pilih Jam / Waktu Baru:
-                </label>
-                <input
-                  type="time"
-                  value={editInputTime}
-                  onChange={(e) => setEditInputTime(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-2xs"
-                />
-              </div>
-
-              {/* Quick Preset Buttons */}
-              <div className="flex items-center gap-2 pt-1">
-                <span className="text-[11px] text-slate-400 font-semibold">Pintasan:</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const now = new Date();
-                    setEditInputDate(toDateInputString(now));
-                    setEditInputTime(toTimeInputString(now));
-                  }}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
-                >
-                  ⚡ Hari Ini
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const d = new Date();
-                    d.setDate(d.getDate() - 1);
-                    setEditInputDate(toDateInputString(d));
-                  }}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
-                >
-                  📅 Kemarin
-                </button>
-              </div>
-            </div>
-
-            {/* Preview of New Indonesian Date */}
-            <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs text-amber-950">
-              <span className="text-[10px] text-amber-700 uppercase font-bold block">Preview Tanggal Baru:</span>
-              <span className="font-bold">
-                {(() => {
-                  try {
-                    const [y, m, d] = editInputDate.split('-').map(Number);
-                    const [hh, mm] = (editInputTime || '12:00').split(':').map(Number);
-                    const dt = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
-                    return formatDateTime(dt.toISOString());
-                  } catch {
-                    return '-';
-                  }
-                })()}
-              </span>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setEditingTxDate(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveDateChange}
-                disabled={!editInputDate}
-                className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 active:scale-95 rounded-xl transition-all shadow-xs disabled:opacity-50"
-              >
-                Simpan Tanggal Baru
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
+      {/* Modal Edit Data Transaksi Lengkap */}
+      <EditTransactionModal
+        key={editingTransaction?.id || 'none'}
+        isOpen={!!editingTransaction}
+        transaction={editingTransaction}
+        products={products}
+        onClose={() => setEditingTransaction(null)}
+        onSave={handleSaveTransaction}
+      />
 
     </div>
   );
