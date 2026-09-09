@@ -1,12 +1,13 @@
 import { StoredUser, DEFAULT_USERS, AUTH_STORAGE_KEYS } from '../data/authData';
 import { db, COLLECTIONS, saveDocToFirestore, deleteDocFromFirestore, syncCollectionToFirestore } from '../lib/firebase';
 import { getDocs, collection } from 'firebase/firestore';
+import { safeLocalStorageSet } from './storage';
 
 export function getUsers(): StoredUser[] {
   try {
     const raw = localStorage.getItem(AUTH_STORAGE_KEYS.CUSTOM_USERS);
     if (!raw) {
-      localStorage.setItem(AUTH_STORAGE_KEYS.CUSTOM_USERS, JSON.stringify(DEFAULT_USERS));
+      safeLocalStorageSet(AUTH_STORAGE_KEYS.CUSTOM_USERS, DEFAULT_USERS);
       syncCollectionToFirestore(COLLECTIONS.USERS, DEFAULT_USERS).catch(console.warn);
       return DEFAULT_USERS;
     }
@@ -32,11 +33,11 @@ export function getUsers(): StoredUser[] {
       });
 
       if (needsSave) {
-        localStorage.setItem(AUTH_STORAGE_KEYS.CUSTOM_USERS, JSON.stringify(cleaned));
+        safeLocalStorageSet(AUTH_STORAGE_KEYS.CUSTOM_USERS, cleaned);
       }
       return cleaned;
     }
-    localStorage.setItem(AUTH_STORAGE_KEYS.CUSTOM_USERS, JSON.stringify(DEFAULT_USERS));
+    safeLocalStorageSet(AUTH_STORAGE_KEYS.CUSTOM_USERS, DEFAULT_USERS);
     return DEFAULT_USERS;
   } catch (err) {
     console.error('Failed to parse users from localStorage:', err);
@@ -65,7 +66,7 @@ export async function fetchUsersFromCloud(): Promise<StoredUser[]> {
           }
         });
 
-        localStorage.setItem(AUTH_STORAGE_KEYS.CUSTOM_USERS, JSON.stringify(cloudUsers));
+        safeLocalStorageSet(AUTH_STORAGE_KEYS.CUSTOM_USERS, cloudUsers);
         return cloudUsers;
       }
     }
@@ -77,7 +78,7 @@ export async function fetchUsersFromCloud(): Promise<StoredUser[]> {
 
 export function saveUsers(users: StoredUser[]): void {
   try {
-    localStorage.setItem(AUTH_STORAGE_KEYS.CUSTOM_USERS, JSON.stringify(users));
+    safeLocalStorageSet(AUTH_STORAGE_KEYS.CUSTOM_USERS, users);
     syncCollectionToFirestore(COLLECTIONS.USERS, users).catch(console.warn);
   } catch (err) {
     console.error('Failed to save users to localStorage:', err);

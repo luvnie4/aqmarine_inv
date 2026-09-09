@@ -1,3 +1,5 @@
+import { safeLocalStorageSet } from './storage';
+
 export interface CategoryFormulaConfig {
   investorPercent: number;    // % dari Laba Kotor
   ownerPercent: number;       // % dari sisa setelah investor (atau dari laba kotor jika investor 0%)
@@ -51,11 +53,7 @@ export function getProfitFormulaSettings(): ProfitFormulaSettings {
 }
 
 export function saveProfitFormulaSettings(settings: ProfitFormulaSettings): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  } catch (err) {
-    console.error('Failed to save formula settings to localStorage:', err);
-  }
+  safeLocalStorageSet(STORAGE_KEY, settings);
 }
 
 export function resetProfitFormulaSettings(): ProfitFormulaSettings {

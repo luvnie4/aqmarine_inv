@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   X, 
   Save, 
@@ -6,6 +6,7 @@ import {
   Clock, 
   User, 
   Phone, 
+  MapPin, 
   Store, 
   Tent, 
   CreditCard, 
@@ -14,7 +15,12 @@ import {
   FileEdit, 
   ShoppingBag,
   Tag,
-  AlertCircle
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  Sparkles,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { SaleTransaction, Product, PaymentMethod } from '../types';
 import { formatRupiah, toDateInputString, toTimeInputString } from '../utils/formatters';
@@ -26,7 +32,7 @@ interface EditTransactionModalProps {
   transaction: SaleTransaction | null;
   products: Product[];
   onClose: () => void;
-  onSave: (updatedTransaction: SaleTransaction) => void;
+  onSave: (updatedTransaction: SaleTransaction) => void | Promise<void>;
 }
 
 interface EditableItem {
@@ -63,31 +69,51 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   const [dateStr, setDateStr] = useState<string>(toDateInputString(validDate));
   const [timeStr, setTimeStr] = useState<string>(toTimeInputString(validDate));
 
-  // Customer & Cashier Info
+  // Customer Info
   const [customerName, setCustomerName] = useState<string>(transaction.customerName || '');
   const [customerPhone, setCustomerPhone] = useState<string>(transaction.customerPhone || '');
-  const [cashier, setCashier] = useState<string>(transaction.cashier || transaction.operator || '');
+  const [customerType, setCustomerType] = useState<string>(transaction.customerType || 'umum');
+  const [customerAddress, setCustomerAddress] = useState<string>((transaction as any).customerAddress || '');
+
+  // Cashier Info
+  const [cashier, setCashier] = useState<string>(transaction.cashier || transaction.operator || 'Kasir');
 
   // Channel & Location
   const [channelType, setChannelType] = useState<string>(
     transaction.salesChannelType || 
     (transaction.bazaarId ? 'bazaar' : 'toko')
   );
+  const [customChannelName, setCustomChannelName] = useState<string>(
+    (transaction as any).customChannelName || transaction.salesChannelName || ''
+  );
   const [selectedOutletId, setSelectedOutletId] = useState<string>(
     transaction.stockDeductedOutletId || transaction.outletId || (outlets[0]?.id || '')
   );
-  const [selectedBazaarId, setSelectedBazaarId] = useState<string>(transaction.bazaarId || '');
+  const [selectedBazaarId, setSelectedBazaarId] = useState<string>(transaction.bazaarId || (bazaars[0]?.id || ''));
 
   // Payment
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(transaction.paymentMethod || 'cash');
-  const [cashPaid, setCashPaid] = useState<number>(transaction.cashPaid ?? transaction.total ?? 0);
+  const [paymentRef, setPaymentRef] = useState<string>((transaction as any).paymentRef || '');
+  const [cashPaid, setCashPaid] = useState<number>(
+    transaction.cashPaid ?? transaction.cashReceived ?? transaction.total ?? 0
+  );
 
   // Notes & Discounts
   const [discountTotal, setDiscountTotal] = useState<number>(transaction.discountTotal || transaction.discount || 0);
   const [notes, setNotes] = useState<string>(transaction.notes || '');
 
-  // Product Selection for Adding New Items
-  const [selectedProductIdToAdd, setSelectedProductIdToAdd] = useState<string>('');
+  // UI state for adding items
+  const [selectedCatalogProductId, setSelectedCatalogProductId] = useState<string>('');
+  const [isManualAddOpen, setIsManualAddOpen] = useState(false);
+  const [manualItemName, setManualItemName] = useState('');
+  const [manualItemCategory, setManualItemCategory] = useState('Hijab');
+  const [manualItemPrice, setManualItemPrice] = useState<number>(0);
+  const [manualItemQty, setManualItemQty] = useState<number>(1);
+  const [manualItemSku, setManualItemSku] = useState('');
+
+  // Status & Feedback
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Editable Items
   const [items, setItems] = useState<EditableItem[]>(() => {
@@ -125,34 +151,36 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
         } else if (lower.includes('gamis') || skuLower.includes('gms')) {
           resolvedCat = 'Gamis';
         } else {
-          resolvedCat = resolvedCat || 'Lainnya';
+          resolvedCat = resolvedCat || 'Hijab';
         }
       }
 
-      const unitPrice = Number(item.unitPrice ?? item.price ?? prod.priceRetail ?? matched?.priceRetail ?? 0);
+      const unitPrice = Number(item.unitPrice || item.price || item.appliedPrice || matched?.priceRetail || 0);
+      const discount = Number(item.discountAmount || item.discount || 0);
+      const quantity = Math.max(1, Number(item.quantity || item.qty || 1));
 
       return {
         id: item.id || `item-${idx}-${Date.now()}`,
-        productId: matched?.id || item.productId || prod.id || `prod-${idx}`,
+        productId: item.productId || prod.id || matched?.id || `prod-${idx}`,
         productName: resolvedName,
         sku: resolvedSku,
         category: resolvedCat,
-        quantity: Math.max(1, Number(item.quantity || 1)),
+        quantity,
         unitPrice,
-        discountAmount: Number(item.discountAmount || 0),
-        selectedPriceType: item.selectedPriceType || 'retail',
+        discountAmount: discount,
+        selectedPriceType: (item.selectedPriceType as any) || (matched && unitPrice === matched.priceGrosir ? 'grosir' : 'retail'),
         unit: item.unit || prod.unit || matched?.unit || 'pcs',
         notes: item.notes || item.colorName || '',
-        productRef: matched || (prod.id ? prod : undefined),
+        productRef: matched,
       };
     });
   });
 
-  // Calculate totals dynamically
+  // Calculations
   const subtotal = useMemo(() => {
     return items.reduce((sum, item) => {
-      const lineTotal = Math.max(0, item.quantity * item.unitPrice - item.discountAmount);
-      return sum + lineTotal;
+      const lineSubtotal = Math.max(0, item.quantity * item.unitPrice - item.discountAmount);
+      return sum + lineSubtotal;
     }, 0);
   }, [items]);
 
@@ -161,41 +189,38 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   }, [subtotal, discountTotal]);
 
   const changeAmount = useMemo(() => {
-    if (paymentMethod === 'cash') {
-      return Math.max(0, cashPaid - grandTotal);
-    }
-    return 0;
+    if (paymentMethod !== 'cash') return 0;
+    return Math.max(0, cashPaid - grandTotal);
   }, [paymentMethod, cashPaid, grandTotal]);
 
-  // Handle Item Modifications
+  // Item modifications
   const handleQuantityChange = (index: number, delta: number) => {
     setItems((prev) => {
       const next = [...prev];
-      const current = next[index];
-      const newQty = Math.max(1, current.quantity + delta);
-      next[index] = { ...current, quantity: newQty };
+      const newQty = Math.max(1, next[index].quantity + delta);
+      next[index] = { ...next[index], quantity: newQty };
       return next;
     });
+    setSaveError(null);
   };
 
-  const handleQuantityDirect = (index: number, qty: number) => {
+  const handleQuantityDirect = (index: number, val: number) => {
+    const safeVal = Math.max(1, isNaN(val) ? 1 : val);
     setItems((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], quantity: Math.max(1, qty) };
+      next[index] = { ...next[index], quantity: safeVal };
       return next;
     });
+    setSaveError(null);
   };
 
-  const handlePriceChange = (index: number, newPrice: number) => {
+  const handlePriceChange = (index: number, price: number) => {
     setItems((prev) => {
       const next = [...prev];
-      next[index] = {
-        ...next[index],
-        unitPrice: Math.max(0, newPrice),
-        selectedPriceType: 'custom',
-      };
+      next[index] = { ...next[index], unitPrice: Math.max(0, price), selectedPriceType: 'custom' };
       return next;
     });
+    setSaveError(null);
   };
 
   const handlePriceTypeChange = (index: number, type: 'retail' | 'grosir') => {
@@ -220,7 +245,6 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
     });
   };
 
-  // Switch product for a specific item row
   const handleSelectProductForItem = (index: number, newProdId: string) => {
     const prod = products.find((p) => p.id === newProdId);
     if (!prod) return;
@@ -241,6 +265,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
       };
       return next;
     });
+    setSaveError(null);
   };
 
   const handleItemProductNameChange = (index: number, name: string) => {
@@ -249,12 +274,29 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
       next[index] = { ...next[index], productName: name };
       return next;
     });
+    setSaveError(null);
   };
 
   const handleItemCategoryChange = (index: number, category: string) => {
     setItems((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], category };
+      return next;
+    });
+  };
+
+  const handleItemSkuChange = (index: number, sku: string) => {
+    setItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], sku };
+      return next;
+    });
+  };
+
+  const handleItemNotesChange = (index: number, notes: string) => {
+    setItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], notes };
       return next;
     });
   };
@@ -269,27 +311,28 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
 
   const handleRemoveItem = (index: number) => {
     if (items.length <= 1) {
-      alert('Transaksi harus memiliki minimal 1 barang.');
+      setSaveError('Transaksi harus memiliki minimal 1 barang belanja. Tidak dapat menghapus semua barang.');
       return;
     }
     setItems((prev) => prev.filter((_, i) => i !== index));
+    setSaveError(null);
   };
 
-  const handleAddItem = () => {
-    if (!selectedProductIdToAdd) return;
-    const prod = products.find((p) => p.id === selectedProductIdToAdd);
+  // Add from catalog
+  const handleAddCatalogItem = () => {
+    if (!selectedCatalogProductId) return;
+    const prod = products.find((p) => p.id === selectedCatalogProductId);
     if (!prod) return;
 
-    // Check if already in items
     const existingIndex = items.findIndex((it) => it.productId === prod.id);
     if (existingIndex >= 0) {
       handleQuantityChange(existingIndex, 1);
-      setSelectedProductIdToAdd('');
+      setSelectedCatalogProductId('');
       return;
     }
 
     const newItem: EditableItem = {
-      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       productId: prod.id,
       productName: prod.name,
       sku: prod.sku,
@@ -304,45 +347,96 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
     };
 
     setItems((prev) => [...prev, newItem]);
-    setSelectedProductIdToAdd('');
+    setSelectedCatalogProductId('');
+    setSaveError(null);
   };
 
-  // Submit and Save
-  const handleSave = () => {
-    if (items.length === 0) {
-      alert('Harap masukkan minimal satu barang dalam transaksi!');
+  // Add manual item
+  const handleAddManualItem = () => {
+    if (!manualItemName.trim()) {
+      setSaveError('Harap isi nama produk sebelum menambahkan barang kustom.');
       return;
     }
 
-    // Verify all items have valid names
-    for (const item of items) {
+    const newItem: EditableItem = {
+      id: `manual-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      productId: `custom-${Date.now()}`,
+      productName: manualItemName.trim(),
+      sku: manualItemSku.trim() || `AQM-CUST-${Math.floor(1000 + Math.random() * 9000)}`,
+      category: manualItemCategory || 'Hijab',
+      quantity: Math.max(1, manualItemQty),
+      unitPrice: Math.max(0, manualItemPrice),
+      discountAmount: 0,
+      selectedPriceType: 'custom',
+      unit: 'pcs',
+      notes: '',
+    };
+
+    setItems((prev) => [...prev, newItem]);
+    setManualItemName('');
+    setManualItemPrice(0);
+    setManualItemQty(1);
+    setManualItemSku('');
+    setIsManualAddOpen(false);
+    setSaveError(null);
+  };
+
+  // Submit and Save
+  const handleSave = async () => {
+    setSaveError(null);
+
+    if (items.length === 0) {
+      setSaveError('Harap masukkan minimal satu barang dalam transaksi!');
+      return;
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
       if (!item.productName || !item.productName.trim()) {
-        alert('Setiap barang harus memiliki nama produk yang jelas!');
+        setSaveError(`Barang #${i + 1} harus memiliki nama produk yang jelas!`);
+        return;
+      }
+      if (item.quantity <= 0) {
+        setSaveError(`Jumlah untuk "${item.productName}" harus minimal 1.`);
         return;
       }
     }
 
     try {
-      const [y, m, d] = dateStr.split('-').map(Number);
-      const [hh, mm] = (timeStr || '12:00').split(':').map(Number);
-      const newDateObj = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
-      const newIsoDate = !isNaN(newDateObj.getTime()) ? newDateObj.toISOString() : transaction.date;
+      setIsSaving(true);
+
+      // Safe date construction
+      let newIsoDate = transaction.date;
+      if (dateStr) {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        const [hh, mm] = (timeStr || '12:00').split(':').map(Number);
+        const newDateObj = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
+        if (!isNaN(newDateObj.getTime())) {
+          newIsoDate = newDateObj.toISOString();
+        }
+      }
 
       const outlet = outlets.find((o) => o.id === selectedOutletId);
       const bazaar = bazaars.find((b) => b.id === selectedBazaarId);
 
       let chName = 'Toko Offline';
-      if (channelType === 'bazaar') chName = bazaar ? `Bazaar: ${bazaar.name}` : 'Bazaar / Event';
-      else if (channelType === 'whatsapp') chName = 'WhatsApp / Online';
-      else if (channelType === 'marketplace') chName = 'Shopee / Marketplace';
+      if (channelType === 'bazaar') {
+        chName = bazaar ? `Bazaar: ${bazaar.name}` : 'Bazaar / Event';
+      } else if (channelType === 'whatsapp') {
+        chName = 'WhatsApp / Online';
+      } else if (channelType === 'marketplace') {
+        chName = 'Shopee / Marketplace';
+      } else if (channelType === 'custom') {
+        chName = customChannelName.trim() || 'Saluran Kustom';
+      }
 
-      // Transform items with full properties (avoid any undefined)
+      // Transform items with complete, sanitized properties
       const savedItems = items.map((item) => {
         const prod = item.productRef || products.find((p) => p.id === item.productId) || {
           id: item.productId,
-          sku: item.sku,
+          sku: item.sku || '-',
           barcode: '',
-          name: item.productName,
+          name: item.productName.trim(),
           category: item.category,
           hpp: 0,
           priceRetail: item.unitPrice,
@@ -359,8 +453,8 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
           productName: item.productName.trim(),
           name: item.productName.trim(),
           sku: item.sku || prod.sku || '-',
-          category: item.category || prod.category || 'Lainnya',
-          colorName: item.notes || (prod as any).colorName,
+          category: item.category || prod.category || 'Hijab',
+          colorName: item.notes || (prod as any).colorName || '',
           price: item.unitPrice,
           unitPrice: item.unitPrice,
           appliedPrice: item.unitPrice,
@@ -376,7 +470,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
             id: prod.id || item.productId,
             name: item.productName.trim(),
             sku: item.sku || prod.sku || '-',
-            category: item.category || prod.category || 'Lainnya',
+            category: item.category || prod.category || 'Hijab',
             priceRetail: item.unitPrice,
           },
         };
@@ -389,12 +483,14 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
         date: newIsoDate,
         customerName: customerName.trim() || 'Pelanggan Umum',
         customerPhone: customerPhone.trim() || undefined,
-        customerType: transaction.customerType || 'umum',
+        customerType: customerType || 'umum',
         cashier: cashier.trim() || 'Kasir',
         operator: cashier.trim() || 'Kasir',
         paymentMethod,
         cashPaid: paymentMethod === 'cash' ? cashPaid : grandTotal,
+        cashReceived: paymentMethod === 'cash' ? cashPaid : grandTotal,
         changeAmount: paymentMethod === 'cash' ? Math.max(0, cashPaid - grandTotal) : 0,
+        cashChange: paymentMethod === 'cash' ? Math.max(0, cashPaid - grandTotal) : 0,
         subtotal,
         discountTotal,
         discount: discountTotal,
@@ -406,25 +502,32 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
         salesChannelType: channelType,
         salesChannelName: chName,
         channelName: chName,
-        outletId: outlet?.id || transaction.outletId,
-        outletName: outlet?.name || transaction.outletName,
-        stockDeductedOutletId: outlet?.id || transaction.stockDeductedOutletId,
-        stockDeductedLocationName: outlet?.name || transaction.stockDeductedLocationName,
-        bazaarId: channelType === 'bazaar' ? bazaar?.id : undefined,
-        bazaarName: channelType === 'bazaar' ? bazaar?.name : undefined,
+        outletId: outlet?.id || transaction.outletId || (outlets[0]?.id || 'outlet-main'),
+        outletName: outlet?.name || transaction.outletName || 'Toko Utama',
+        stockDeductedOutletId: outlet?.id || transaction.stockDeductedOutletId || (outlets[0]?.id || 'outlet-main'),
+        stockDeductedLocationName: outlet?.name || transaction.stockDeductedLocationName || 'Toko Utama',
+        bazaarId: channelType === 'bazaar' ? (bazaar?.id || selectedBazaarId) : undefined,
+        bazaarName: channelType === 'bazaar' ? (bazaar?.name || undefined) : undefined,
       };
 
-      onSave(updatedTx);
+      // Add extra flexible metadata
+      (updatedTx as any).customerAddress = customerAddress.trim() || undefined;
+      (updatedTx as any).customChannelName = channelType === 'custom' ? customChannelName.trim() : undefined;
+      (updatedTx as any).paymentRef = paymentRef.trim() || undefined;
+
+      await onSave(updatedTx);
+      setIsSaving(false);
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating transaction:', err);
-      alert('Gagal menyimpan perubahan transaksi. Periksa kembali format input.');
+      setIsSaving(false);
+      setSaveError('Gagal menyimpan perubahan transaksi: ' + (err?.message || 'Periksa kembali data yang diinput'));
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-xs overflow-y-auto animate-in fade-in">
-      <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-100 my-auto overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-100 my-auto overflow-hidden flex flex-col max-h-[94vh]">
         
         {/* Header Modal */}
         <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
@@ -434,19 +537,20 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-black text-base sm:text-lg">Edit Data Transaksi</h3>
+                <h3 className="font-black text-base sm:text-lg">Edit Data Transaksi Lengkap</h3>
                 <span className="font-mono text-xs px-2.5 py-0.5 rounded-md bg-white/15 text-amber-300 font-bold tracking-wide">
                   {transaction.transactionNumber}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Formulir lengkap untuk mengedit tanggal, produk, pelanggan, saluran, & pembayaran
+                Ubah tanggal, barang belanja, kuantitas, harga, pelanggan, saluran, & pembayaran
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            disabled={isSaving}
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-40"
           >
             <X className="w-5 h-5" />
           </button>
@@ -455,16 +559,23 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
         {/* Modal Body Scrollable */}
         <div className="p-5 sm:p-6 overflow-y-auto space-y-5 text-xs sm:text-sm">
           
-          {/* Info Banner */}
-          <div className="p-3 bg-amber-50/90 border border-amber-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-amber-950">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Penyesuaian Data Transaksi</p>
-              <p className="text-amber-800 text-[11px] mt-0.5">
-                Perubahan nama barang, kategori, kuantitas, atau outlet stok akan langsung disinkronkan ke database dan laporan penjualan.
-              </p>
+          {/* Error Banner if any */}
+          {saveError && (
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2.5 text-xs text-rose-900 animate-in fade-in">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-bold">Perhatian: Data Belum Dapat Disimpan</p>
+                <p className="text-rose-700 mt-0.5">{saveError}</p>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setSaveError(null)}
+                className="text-rose-400 hover:text-rose-700 text-xs font-bold"
+              >
+                ✕
+              </button>
             </div>
-          </div>
+          )}
 
           {/* Section 1: Tanggal & Waktu Transaksi */}
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
@@ -505,7 +616,10 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                 <input
                   type="date"
                   value={dateStr}
-                  onChange={(e) => setDateStr(e.target.value)}
+                  onChange={(e) => {
+                    setDateStr(e.target.value);
+                    setSaveError(null);
+                  }}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
                 />
               </div>
@@ -514,124 +628,184 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                 <input
                   type="time"
                   value={timeStr}
-                  onChange={(e) => setTimeStr(e.target.value)}
+                  onChange={(e) => {
+                    setTimeStr(e.target.value);
+                    setSaveError(null);
+                  }}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
                 />
               </div>
             </div>
           </div>
 
-          {/* Section 2: Pelanggan & Kasir */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
-                <User className="w-3.5 h-3.5 text-slate-500" />
-                Nama Pelanggan:
-              </label>
-              <input
-                type="text"
-                placeholder="Pelanggan Umum"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-              />
+          {/* Section 2: Data Pelanggan & Petugas Kasir */}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+            <span className="font-bold text-slate-800 text-xs uppercase flex items-center gap-1.5 border-b border-slate-200/80 pb-2">
+              <User className="w-3.5 h-3.5 text-amber-600" />
+              Data Pelanggan & Kasir
+            </span>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1 text-xs">
+                  Nama Pelanggan:
+                </label>
+                <input
+                  type="text"
+                  placeholder="Pelanggan Umum"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1 text-xs">
+                  Tipe Pelanggan:
+                </label>
+                <select
+                  value={customerType}
+                  onChange={(e) => setCustomerType(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                >
+                  <option value="umum">Umum / Retail</option>
+                  <option value="grosir">Grosir / Reseller</option>
+                  <option value="member">Member Aqmarine</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
+                  <Phone className="w-3.5 h-3.5 text-slate-400" />
+                  No. WhatsApp / HP:
+                </label>
+                <input
+                  type="text"
+                  placeholder="0812xxxx"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
+                  <Store className="w-3.5 h-3.5 text-slate-400" />
+                  Petugas / Kasir:
+                </label>
+                <input
+                  type="text"
+                  placeholder="Nama Kasir"
+                  value={cashier}
+                  onChange={(e) => setCashier(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                />
+              </div>
             </div>
+
             <div>
-              <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
-                <Phone className="w-3.5 h-3.5 text-slate-500" />
-                No. WhatsApp / Telepon:
+              <label className="block text-slate-700 font-semibold mb-1 text-xs flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                Alamat / Keterangan Pelanggan:
               </label>
               <input
                 type="text"
-                placeholder="0812xxxx"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
-                <Store className="w-3.5 h-3.5 text-slate-500" />
-                Petugas / Kasir:
-              </label>
-              <input
-                type="text"
-                placeholder="Nama Kasir"
-                value={cashier}
-                onChange={(e) => setCashier(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                placeholder="Alamat pengiriman / catatan pelanggan (opsional)..."
+                value={customerAddress}
+                onChange={(e) => setCustomerAddress(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
               />
             </div>
           </div>
 
           {/* Section 3: Saluran Penjualan & Lokasi Pemotongan Stok */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
-            <div>
-              <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
-                <Tent className="w-3.5 h-3.5 text-amber-600" />
-                Saluran Penjualan:
-              </label>
-              <select
-                value={channelType}
-                onChange={(e) => setChannelType(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-              >
-                <option value="toko">🏪 Toko Offline</option>
-                <option value="bazaar">🎪 Bazaar / Event Pameran</option>
-                <option value="whatsapp">📱 WhatsApp / Online Order</option>
-                <option value="marketplace">🛍️ Shopee / Marketplace</option>
-              </select>
-            </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+            <span className="font-bold text-slate-800 text-xs uppercase flex items-center gap-1.5 border-b border-slate-200/80 pb-2">
+              <Tent className="w-3.5 h-3.5 text-amber-600" />
+              Saluran Penjualan & Alokasi Stok
+            </span>
 
-            {channelType === 'bazaar' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
-                  <Tent className="w-3.5 h-3.5 text-amber-600" />
-                  Pilih Event Bazaar:
+                <label className="block text-slate-700 font-bold mb-1 text-xs">
+                  Saluran Penjualan:
                 </label>
                 <select
-                  value={selectedBazaarId}
-                  onChange={(e) => setSelectedBazaarId(e.target.value)}
+                  value={channelType}
+                  onChange={(e) => setChannelType(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
                 >
-                  <option value="">-- Pilih Bazaar --</option>
-                  {bazaars.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} ({b.location})
-                    </option>
-                  ))}
+                  <option value="toko">🏪 Toko Offline</option>
+                  <option value="bazaar">🎪 Bazaar / Event Pameran</option>
+                  <option value="whatsapp">📱 WhatsApp / Online Order</option>
+                  <option value="marketplace">🛍️ Shopee / Marketplace</option>
+                  <option value="custom">✨ Kustom / Saluran Lainnya</option>
                 </select>
               </div>
-            ) : (
-              <div>
-                <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
-                  <Store className="w-3.5 h-3.5 text-emerald-600" />
-                  Outlet / Lokasi Pemotongan Stok:
-                </label>
-                <select
-                  value={selectedOutletId}
-                  onChange={(e) => setSelectedOutletId(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                >
-                  {outlets.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name} ({o.code}) {o.isDefault ? '- Toko Utama' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+
+              {channelType === 'bazaar' ? (
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
+                    <Tent className="w-3.5 h-3.5 text-amber-600" />
+                    Pilih Event Bazaar:
+                  </label>
+                  <select
+                    value={selectedBazaarId}
+                    onChange={(e) => setSelectedBazaarId(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  >
+                    <option value="">-- Pilih Bazaar --</option>
+                    {bazaars.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.location})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : channelType === 'custom' ? (
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1 text-xs">
+                    Nama Saluran Kustom:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Reseller VIP, Pameran Mall..."
+                    value={customChannelName}
+                    onChange={(e) => setCustomChannelName(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
+                    <Store className="w-3.5 h-3.5 text-emerald-600" />
+                    Outlet / Lokasi Pemotongan Stok:
+                  </label>
+                  <select
+                    value={selectedOutletId}
+                    onChange={(e) => setSelectedOutletId(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  >
+                    {outlets.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name} ({o.code}) {o.isDefault ? '- Toko Utama' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Section 4: Rincian Produk & Kuantitas */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <span className="font-bold text-slate-900 text-xs uppercase flex items-center gap-1.5">
                 <ShoppingBag className="w-4 h-4 text-emerald-600" />
-                Daftar Produk Transaksi ({items.length} Barang)
+                Daftar Barang Belanja ({items.length} Macam Barang)
               </span>
               <span className="text-[11px] text-slate-500">
-                Pilih produk dari katalog atau ubah detail secara langsung
+                Nama, SKU, kategori, harga, dan diskon barang dapat diedit langsung
               </span>
             </div>
 
@@ -640,18 +814,20 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
               {items.map((item, idx) => {
                 const itemLineSubtotal = Math.max(0, item.quantity * item.unitPrice - item.discountAmount);
                 return (
-                  <div key={item.id} className="p-3.5 hover:bg-slate-50/70 transition-colors space-y-3">
+                  <div key={item.id} className="p-4 hover:bg-slate-50/70 transition-colors space-y-3">
                     
-                    {/* Top Row: Product Selector / Title & Category */}
+                    {/* Top Row: Switch Product or Edit Name & Category */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                      <div className="flex-1 space-y-1">
+                      <div className="flex-1 space-y-2">
                         {/* Selector to switch catalog product */}
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Produk #{idx + 1}:</span>
+                          <span className="text-[10px] font-bold text-slate-500 uppercase shrink-0">
+                            Barang #{idx + 1}:
+                          </span>
                           <select
                             value={item.productId}
                             onChange={(e) => handleSelectProductForItem(idx, e.target.value)}
-                            className="w-full max-w-sm px-2.5 py-1 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                            className="w-full max-w-sm px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
                           >
                             <option value={item.productId}>
                               {item.productName} ({item.sku})
@@ -666,28 +842,53 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                           </select>
                         </div>
 
-                        {/* Inline Name and Category Inputs */}
-                        <div className="flex items-center gap-2 pt-0.5">
+                        {/* Inline Name, Category, SKU, and Notes */}
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-0.5">
+                          <div className="sm:col-span-2">
+                            <input
+                              type="text"
+                              value={item.productName}
+                              onChange={(e) => handleItemProductNameChange(idx, e.target.value)}
+                              placeholder="Nama Produk"
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-1 focus:ring-amber-500"
+                              title="Edit nama produk jika perlu"
+                            />
+                          </div>
+                          <div>
+                            <select
+                              value={item.category}
+                              onChange={(e) => handleItemCategoryChange(idx, e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-1 focus:ring-amber-500"
+                              title="Kategori Produk"
+                            >
+                              <option value="Hijab">🧕 Hijab</option>
+                              <option value="Mukena">🥻 Mukena</option>
+                              <option value="Gamis">👗 Gamis</option>
+                              <option value="Aksesoris">💍 Aksesoris</option>
+                              <option value="Lainnya">📦 Lainnya</option>
+                            </select>
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              value={item.sku}
+                              onChange={(e) => handleItemSkuChange(idx, e.target.value)}
+                              placeholder="SKU / Kode"
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-700 focus:ring-1 focus:ring-amber-500"
+                              title="Kode SKU produk"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Notes / Variant */}
+                        <div>
                           <input
                             type="text"
-                            value={item.productName}
-                            onChange={(e) => handleItemProductNameChange(idx, e.target.value)}
-                            placeholder="Nama Produk"
-                            className="flex-1 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:ring-1 focus:ring-amber-500"
-                            title="Edit nama produk jika perlu"
+                            value={item.notes || ''}
+                            onChange={(e) => handleItemNotesChange(idx, e.target.value)}
+                            placeholder="Catatan varian warna / motif / ukuran..."
+                            className="w-full px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-600 focus:ring-1 focus:ring-amber-500"
                           />
-                          <select
-                            value={item.category}
-                            onChange={(e) => handleItemCategoryChange(idx, e.target.value)}
-                            className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700 focus:ring-1 focus:ring-amber-500"
-                            title="Kategori Produk"
-                          >
-                            <option value="Hijab">🧕 Hijab</option>
-                            <option value="Mukena">🥻 Mukena</option>
-                            <option value="Gamis">👗 Gamis</option>
-                            <option value="Aksesoris">💍 Aksesoris</option>
-                            <option value="Lainnya">📦 Lainnya</option>
-                          </select>
                         </div>
                       </div>
 
@@ -695,7 +896,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleRemoveItem(idx)}
-                        className="self-end sm:self-center p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        className="self-end sm:self-center p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
                         title="Hapus barang dari transaksi"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -703,7 +904,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                     </div>
 
                     {/* Quantity & Price Controls */}
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 items-center pt-2 border-t border-slate-100">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-center pt-2.5 border-t border-slate-100">
                       
                       {/* Quantity counter */}
                       <div className="col-span-1">
@@ -799,36 +1000,118 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
               })}
             </div>
 
-            {/* Add more products */}
-            <div className="flex items-center gap-2 pt-1">
-              <select
-                value={selectedProductIdToAdd}
-                onChange={(e) => setSelectedProductIdToAdd(e.target.value)}
-                className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-700 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-              >
-                <option value="">-- Tambah Produk Lain ke Transaksi Ini --</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.sku}) - {formatRupiah(p.priceRetail)}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={handleAddItem}
-                disabled={!selectedProductIdToAdd}
-                className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white font-bold text-xs rounded-xl inline-flex items-center gap-1.5 transition-all shrink-0 shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Tambah Produk
-              </button>
+            {/* Actions for Adding More Items */}
+            <div className="space-y-2 pt-1">
+              {/* Option 1: Add from Catalog */}
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedCatalogProductId}
+                  onChange={(e) => setSelectedCatalogProductId(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-700 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                >
+                  <option value="">-- Tambah Produk dari Katalog Toko --</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.sku}) - {formatRupiah(p.priceRetail)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleAddCatalogItem}
+                  disabled={!selectedCatalogProductId}
+                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white font-bold text-xs rounded-xl inline-flex items-center gap-1.5 transition-all shrink-0 shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Tambah dari Katalog
+                </button>
+              </div>
+
+              {/* Option 2: Add Manual / Custom Product Button */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setIsManualAddOpen(!isManualAddOpen)}
+                  className="text-xs font-bold text-[#9D6C72] hover:text-[#8B5E64] inline-flex items-center gap-1 transition-colors"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{isManualAddOpen ? 'Tutup Form Barang Bebas' : '+ Tambah Barang Bebas / Kustom (Tanpa Katalog)'}</span>
+                  {isManualAddOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
+
+                {isManualAddOpen && (
+                  <div className="mt-2 p-3.5 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-3 animate-in fade-in">
+                    <p className="text-[11px] font-bold text-amber-900">
+                      Input Barang Baru / Custom Langsung ke Transaksi:
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Nama Produk:</label>
+                        <input
+                          type="text"
+                          placeholder="Nama Barang Kustom..."
+                          value={manualItemName}
+                          onChange={(e) => setManualItemName(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-bold text-slate-800"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Kategori:</label>
+                        <select
+                          value={manualItemCategory}
+                          onChange={(e) => setManualItemCategory(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-bold text-slate-800"
+                        >
+                          <option value="Hijab">Hijab</option>
+                          <option value="Mukena">Mukena</option>
+                          <option value="Gamis">Gamis</option>
+                          <option value="Aksesoris">Aksesoris</option>
+                          <option value="Lainnya">Lainnya</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Harga Satuan (Rp):</label>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={manualItemPrice || ''}
+                          onChange={(e) => setManualItemPrice(Number(e.target.value) || 0)}
+                          className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-bold text-slate-800"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <div className="flex items-center gap-2">
+                        <label className="text-[10px] font-bold text-slate-600">Jumlah (Qty):</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={manualItemQty}
+                          onChange={(e) => setManualItemQty(Math.max(1, Number(e.target.value) || 1))}
+                          className="w-16 px-2 py-1 bg-white border border-amber-300 rounded-lg text-xs font-bold text-center"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAddManualItem}
+                        className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1 shadow-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Tambahkan Barang Ini
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
           {/* Section 5: Pembayaran, Diskon Transaksi & Catatan */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
             
-            {/* Left Column: Payment Method & Notes */}
+            {/* Left Column: Payment Method & Details */}
             <div className="space-y-3">
               <div>
                 <label className="block text-slate-700 font-bold mb-1 text-xs flex items-center gap-1">
@@ -848,7 +1131,23 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                 </select>
               </div>
 
-              {/* If cash: show cashPaid and change */}
+              {/* If non-cash, show reference input */}
+              {paymentMethod !== 'cash' && (
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1 text-xs">
+                    Referensi / Bank / Bukti:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Nama bank / no. referensi QRIS / debit..."
+                    value={paymentRef}
+                    onChange={(e) => setPaymentRef(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                </div>
+              )}
+
+              {/* If cash: show cashPaid and quick change */}
               {paymentMethod === 'cash' && (
                 <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl space-y-2">
                   <div>
@@ -942,7 +1241,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
               </div>
 
               {/* Total Calculation Card */}
-              <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2 text-xs shadow-2xs">
+              <div className="p-4 bg-white border border-slate-200 rounded-2xl space-y-2.5 text-xs shadow-2xs">
                 <div className="flex justify-between text-slate-600">
                   <span>Subtotal ({items.reduce((s, i) => s + i.quantity, 0)} pcs):</span>
                   <span className="font-bold text-slate-900">{formatRupiah(subtotal)}</span>
@@ -971,17 +1270,29 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200/80 rounded-xl transition-colors"
+            disabled={isSaving}
+            className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200/80 rounded-xl transition-colors disabled:opacity-50"
           >
             Batal
           </button>
+
           <button
             type="button"
             onClick={handleSave}
-            className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs rounded-xl inline-flex items-center gap-2 transition-all shadow-sm"
+            disabled={isSaving}
+            className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs rounded-xl inline-flex items-center gap-2 transition-all shadow-sm disabled:opacity-50"
           >
-            <Save className="w-4 h-4" />
-            Simpan Perubahan Transaksi
+            {isSaving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Menyimpan Perubahan...</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                <span>Simpan Perubahan Transaksi</span>
+              </>
+            )}
           </button>
         </div>
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Product, 
   ActiveTab, 
@@ -50,6 +50,7 @@ import {
   syncCollectionToFirestore 
 } from './lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { safeLocalStorageSet, safeLocalStorageGet } from './utils/storage';
 
 const STORAGE_KEYS = {
   PRODUCTS: 'aqmarine_boutique_products_v1',
@@ -110,23 +111,25 @@ export function normalizeTransactionRecord(tx: SaleTransaction, availableProduct
     const hpp = Number(item.hpp ?? prodRef.hpp ?? matched?.hpp ?? 0);
     const unit = item.unit || prodRef.unit || matched?.unit || 'pcs';
 
-    const fullProduct = matched || {
-      id: candidateId || `prod-${idx}`,
-      sku,
-      barcode: '',
+    const compactProduct = {
+      id: matched?.id || candidateId || `prod-${idx}`,
+      sku: sku || matched?.sku || '-',
+      barcode: matched?.barcode || '',
       name: productName,
       category,
       hpp,
       priceRetail: unitPrice,
-      priceGrosir: unitPrice,
-      stockToko: 0,
-      minStockAlert: 5,
+      priceGrosir: matched?.priceGrosir ?? unitPrice,
+      stockToko: matched?.stockToko ?? 0,
+      minStockAlert: matched?.minStockAlert ?? 5,
       unit,
+      // Keep only non-base64 image URLs to keep transaction items extremely lightweight
+      image: matched?.image && !matched.image.startsWith('data:') ? matched.image : undefined,
     };
 
     return {
       ...item,
-      productId: candidateId || fullProduct.id,
+      productId: candidateId || compactProduct.id,
       productName,
       name: productName,
       sku,
@@ -139,7 +142,7 @@ export function normalizeTransactionRecord(tx: SaleTransaction, availableProduct
       subtotal,
       hpp,
       unit,
-      product: fullProduct,
+      product: compactProduct,
     };
   });
 
@@ -224,6 +227,12 @@ export function App() {
 
   const [cloudSyncState, setCloudSyncState] = useState<'synced' | 'syncing' | 'offline'>('synced');
 
+  // Ref to hold the freshest products list for background listeners
+  const productsRef = useRef<Product[]>(products);
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
+
   // Modal States
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -252,10 +261,15 @@ export function App() {
         if (!snap.empty) {
           const cloudProducts: Product[] = [];
           snap.forEach((docSnap) => {
-            cloudProducts.push(docSnap.data() as Product);
+            const data = docSnap.data();
+            cloudProducts.push({
+              id: docSnap.id,
+              ...data,
+            } as Product);
           });
           setProducts(cloudProducts);
-          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(cloudProducts));
+          productsRef.current = cloudProducts;
+          safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, cloudProducts);
         }
         setCloudSyncState('synced');
       },
@@ -272,12 +286,16 @@ export function App() {
         if (!snap.empty) {
           const cloudTransactions: SaleTransaction[] = [];
           snap.forEach((docSnap) => {
-            cloudTransactions.push(docSnap.data() as SaleTransaction);
+            const data = docSnap.data();
+            cloudTransactions.push({
+              id: docSnap.id,
+              ...data,
+            } as SaleTransaction);
           });
           cloudTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          const normalizedCloud = cloudTransactions.map((t) => normalizeTransactionRecord(t, products));
+          const normalizedCloud = cloudTransactions.map((t) => normalizeTransactionRecord(t, productsRef.current));
           setTransactions(normalizedCloud);
-          localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(normalizedCloud));
+          safeLocalStorageSet(STORAGE_KEYS.TRANSACTIONS, normalizedCloud);
         }
       },
       (error) => {
@@ -292,11 +310,15 @@ export function App() {
         if (!snap.empty) {
           const cloudTransfers: StockTransfer[] = [];
           snap.forEach((docSnap) => {
-            cloudTransfers.push(docSnap.data() as StockTransfer);
+            const data = docSnap.data();
+            cloudTransfers.push({
+              id: docSnap.id,
+              ...data,
+            } as StockTransfer);
           });
           cloudTransfers.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           setTransfers(cloudTransfers);
-          localStorage.setItem(STORAGE_KEYS.TRANSFERS, JSON.stringify(cloudTransfers));
+          safeLocalStorageSet(STORAGE_KEYS.TRANSFERS, cloudTransfers);
         }
       },
       (error) => {
@@ -311,11 +333,15 @@ export function App() {
         if (!snap.empty) {
           const cloudAdjustments: StockAdjustment[] = [];
           snap.forEach((docSnap) => {
-            cloudAdjustments.push(docSnap.data() as StockAdjustment);
+            const data = docSnap.data();
+            cloudAdjustments.push({
+              id: docSnap.id,
+              ...data,
+            } as StockAdjustment);
           });
           cloudAdjustments.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           setAdjustments(cloudAdjustments);
-          localStorage.setItem(STORAGE_KEYS.ADJUSTMENTS, JSON.stringify(cloudAdjustments));
+          safeLocalStorageSet(STORAGE_KEYS.ADJUSTMENTS, cloudAdjustments);
         }
       },
       (error) => {
@@ -330,11 +356,15 @@ export function App() {
         if (!snap.empty) {
           const cloudRestocks: StockRestock[] = [];
           snap.forEach((docSnap) => {
-            cloudRestocks.push(docSnap.data() as StockRestock);
+            const data = docSnap.data();
+            cloudRestocks.push({
+              id: docSnap.id,
+              ...data,
+            } as StockRestock);
           });
           cloudRestocks.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           setRestocks(cloudRestocks);
-          localStorage.setItem(STORAGE_KEYS.RESTOCKS, JSON.stringify(cloudRestocks));
+          safeLocalStorageSet(STORAGE_KEYS.RESTOCKS, cloudRestocks);
         }
       },
       (error) => {
@@ -351,7 +381,7 @@ export function App() {
           snap.forEach((docSnap) => {
             cloudUsers.push(docSnap.data());
           });
-          localStorage.setItem(AUTH_STORAGE_KEYS.CUSTOM_USERS, JSON.stringify(cloudUsers));
+          safeLocalStorageSet(AUTH_STORAGE_KEYS.CUSTOM_USERS, cloudUsers);
         }
       },
       (error) => {
@@ -369,7 +399,7 @@ export function App() {
             cloudBazaars.push(docSnap.data());
           });
           const cleanBazaars = filterOutDummyBazaars(cloudBazaars);
-          localStorage.setItem('aqmarine_bazaar_events_v1', JSON.stringify(cleanBazaars));
+          safeLocalStorageSet('aqmarine_bazaar_events_v1', cleanBazaars);
           window.dispatchEvent(new CustomEvent('bazaar_updated', { detail: cleanBazaars }));
         } else {
           // If Firestore is empty, check if local has user-created bazaars and upload them!
@@ -378,7 +408,7 @@ export function App() {
           if (cleanLocal.length > 0) {
             syncCollectionToFirestore(COLLECTIONS.BAZAARS, cleanLocal).catch(console.warn);
           } else {
-            localStorage.setItem('aqmarine_bazaar_events_v1', JSON.stringify([]));
+            safeLocalStorageSet('aqmarine_bazaar_events_v1', []);
             window.dispatchEvent(new CustomEvent('bazaar_updated', { detail: [] }));
           }
         }
@@ -397,7 +427,7 @@ export function App() {
           snap.forEach((docSnap) => {
             cloudOutlets.push(docSnap.data());
           });
-          localStorage.setItem('aqmarine_store_outlets_v1', JSON.stringify(cloudOutlets));
+          safeLocalStorageSet('aqmarine_store_outlets_v1', cloudOutlets);
           window.dispatchEvent(new CustomEvent('outlet_updated', { detail: cloudOutlets }));
         }
       },
@@ -415,7 +445,7 @@ export function App() {
           snap.forEach((docSnap) => {
             cloudChannels.push(docSnap.data());
           });
-          localStorage.setItem('aqmarine_sales_channels_v1', JSON.stringify(cloudChannels));
+          safeLocalStorageSet('aqmarine_sales_channels_v1', cloudChannels);
           window.dispatchEvent(new CustomEvent('channel_updated', { detail: cloudChannels }));
         }
       },
@@ -432,9 +462,9 @@ export function App() {
           snap.forEach((docSnap) => {
             const data = docSnap.data();
             if (data.id === 'hijab' && Array.isArray(data.subcategories)) {
-              localStorage.setItem('aqmarine_subcats_hijab_v1', JSON.stringify(data.subcategories));
+              safeLocalStorageSet('aqmarine_subcats_hijab_v1', data.subcategories);
             } else if (data.id === 'mukena' && Array.isArray(data.subcategories)) {
-              localStorage.setItem('aqmarine_subcats_mukena_v1', JSON.stringify(data.subcategories));
+              safeLocalStorageSet('aqmarine_subcats_mukena_v1', data.subcategories);
             }
           });
           window.dispatchEvent(new CustomEvent('subcats_updated'));
@@ -460,16 +490,20 @@ export function App() {
 
   // Save active tab
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_TAB, activeTab);
+    safeLocalStorageSet(STORAGE_KEYS.ACTIVE_TAB, activeTab);
   }, [activeTab]);
 
   // Auth handlers
   const handleLoginSuccess = (user: UserAccount, rememberMe: boolean) => {
     setCurrentUser(user);
     if (rememberMe) {
-      localStorage.setItem(AUTH_STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+      safeLocalStorageSet(AUTH_STORAGE_KEYS.CURRENT_USER, user);
     } else {
-      sessionStorage.setItem(AUTH_STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+      try {
+        sessionStorage.setItem(AUTH_STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+      } catch (err) {
+        console.warn('Could not set sessionStorage for user:', err);
+      }
     }
   };
 
@@ -491,7 +525,7 @@ export function App() {
     }
 
     setProducts(updatedProducts);
-    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+    safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updatedProducts);
     saveDocToFirestore(COLLECTIONS.PRODUCTS, product).catch(console.warn);
 
     setIsAddProductOpen(false);
@@ -502,7 +536,7 @@ export function App() {
     if (window.confirm('Yakin ingin menghapus produk ini dari database?')) {
       const updated = products.filter((p) => p.id !== productId);
       setProducts(updated);
-      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updated));
+      safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updated);
       deleteDocFromFirestore(COLLECTIONS.PRODUCTS, productId).catch(console.warn);
     }
   };
@@ -520,7 +554,7 @@ export function App() {
       updated = [...products, ...newItems];
     }
     setProducts(updated);
-    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updated));
+    safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updated);
     syncCollectionToFirestore(COLLECTIONS.PRODUCTS, updated).catch(console.warn);
   };
 
@@ -557,7 +591,7 @@ export function App() {
     });
 
     setProducts(updatedProducts);
-    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+    safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updatedProducts);
     
     const affectedProd = updatedProducts.find((p) => p.id === transfer.productId);
     if (affectedProd) {
@@ -566,7 +600,7 @@ export function App() {
 
     const updatedTransfers = [transfer, ...transfers];
     setTransfers(updatedTransfers);
-    localStorage.setItem(STORAGE_KEYS.TRANSFERS, JSON.stringify(updatedTransfers));
+    safeLocalStorageSet(STORAGE_KEYS.TRANSFERS, updatedTransfers);
     saveDocToFirestore(COLLECTIONS.TRANSFERS, transfer).catch(console.warn);
 
     setIsTransferModalOpen(false);
@@ -594,9 +628,9 @@ export function App() {
       return {
         ...p,
         stockToko: totalToko,
-        // Reset stok awal ke stok aktual hasil opname fisik agar siklus audit baru dimulai dari sini
-        initialStock: totalToko,
-        incomingStock: 0,
+        // Koreksi periodik menyesuaikan stok fisik berjalan tanpa mereset stok awal awal-periode dan stok masuk
+        initialStock: p.initialStock !== undefined ? p.initialStock : (p.stockToko || totalToko),
+        incomingStock: p.incomingStock || 0,
         lastOpnameAt: nowIso,
         outletStocks,
         updatedAt: nowIso,
@@ -604,7 +638,7 @@ export function App() {
     });
 
     setProducts(updatedProducts);
-    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+    safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updatedProducts);
 
     const affectedProd = updatedProducts.find((p) => p.id === adjustment.productId);
     if (affectedProd) {
@@ -613,7 +647,7 @@ export function App() {
 
     const updatedAdjustments = [adjustment, ...adjustments];
     setAdjustments(updatedAdjustments);
-    localStorage.setItem(STORAGE_KEYS.ADJUSTMENTS, JSON.stringify(updatedAdjustments));
+    safeLocalStorageSet(STORAGE_KEYS.ADJUSTMENTS, updatedAdjustments);
     saveDocToFirestore(COLLECTIONS.ADJUSTMENTS, adjustment).catch(console.warn);
 
     setIsOpnameModalOpen(false);
@@ -654,7 +688,7 @@ export function App() {
     });
 
     setProducts(updatedProducts);
-    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+    safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updatedProducts);
 
     const affectedProd = updatedProducts.find((p) => p.id === restock.productId);
     if (affectedProd) {
@@ -663,7 +697,7 @@ export function App() {
 
     const updatedRestocks = [restock, ...restocks];
     setRestocks(updatedRestocks);
-    localStorage.setItem(STORAGE_KEYS.RESTOCKS, JSON.stringify(updatedRestocks));
+    safeLocalStorageSet(STORAGE_KEYS.RESTOCKS, updatedRestocks);
     saveDocToFirestore(COLLECTIONS.RESTOCKS, restock).catch(console.warn);
 
     setIsRestockModalOpen(false);
@@ -691,7 +725,7 @@ export function App() {
     });
 
     setProducts(updatedProducts);
-    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+    safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updatedProducts);
 
     tx.items.forEach((item: any) => {
       const prodId = item.product?.id || item.productId;
@@ -703,18 +737,18 @@ export function App() {
 
     const updatedTransactions = [tx, ...transactions];
     setTransactions(updatedTransactions);
-    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updatedTransactions));
+    safeLocalStorageSet(STORAGE_KEYS.TRANSACTIONS, updatedTransactions);
     saveDocToFirestore(COLLECTIONS.TRANSACTIONS, tx).catch(console.warn);
 
     setReceiptTransaction(tx);
   };
 
-  // Auto-heal existing transactions when products change
+  // Auto-heal corrupt or missing product metadata on transactions when catalog updates
   useEffect(() => {
     if (!transactions.length || !products.length) return;
     let needsHeal = false;
     for (const tx of transactions) {
-      if (tx.items?.some((i: any) => !i.productName || i.productName === 'undefined' || !i.category || i.category === 'Lainnya')) {
+      if (tx.items?.some((i: any) => !i.productName || i.productName === 'undefined' || i.category === 'undefined')) {
         needsHeal = true;
         break;
       }
@@ -722,7 +756,7 @@ export function App() {
     if (needsHeal) {
       const healed = transactions.map((t) => normalizeTransactionRecord(t, products));
       setTransactions(healed);
-      localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(healed));
+      safeLocalStorageSet(STORAGE_KEYS.TRANSACTIONS, healed);
       healed.forEach((tx) => {
         saveDocToFirestore(COLLECTIONS.TRANSACTIONS, tx).catch(() => {});
       });
@@ -730,64 +764,85 @@ export function App() {
   }, [products]);
 
   // Update Existing Transaction (Full Edit Data Transaksi)
-  const handleUpdateTransaction = (updatedTx: SaleTransaction) => {
-    const oldTx = transactions.find((t) => t.id === updatedTx.id);
+  const handleUpdateTransaction = async (updatedTx: SaleTransaction): Promise<boolean> => {
+    try {
+      const oldTx = transactions.find((t) => t.id === updatedTx.id);
+      let currentProducts = products;
 
-    // If stock deduction is involved, adjust product stocks accordingly
-    if (oldTx) {
-      const oldOutletId = oldTx.stockDeductedOutletId || oldTx.outletId || 'outlet-main';
-      const newOutletId = updatedTx.stockDeductedOutletId || updatedTx.outletId || 'outlet-main';
+      // If stock deduction is involved, adjust product stocks accordingly
+      if (oldTx) {
+        const oldOutletId = oldTx.stockDeductedOutletId || oldTx.outletId || 'outlet-main';
+        const newOutletId = updatedTx.stockDeductedOutletId || updatedTx.outletId || 'outlet-main';
 
-      const updatedProducts = products.map((p) => {
-        let outletStocks = { ...(p.outletStocks || {}) };
-        let modified = false;
+        const updatedProducts = products.map((p) => {
+          let outletStocks = { ...(p.outletStocks || {}) };
+          let modified = false;
 
-        // Revert old item quantity
-        const oldItem = oldTx.items?.find((i: any) => (i.product?.id || i.productId) === p.id);
-        if (oldItem) {
-          outletStocks[oldOutletId] = (outletStocks[oldOutletId] || 0) + (oldItem.quantity || 0);
-          modified = true;
-        }
+          // Revert old item quantity
+          const oldItem = oldTx.items?.find((i: any) => (i.product?.id || i.productId) === p.id);
+          if (oldItem) {
+            outletStocks[oldOutletId] = (outletStocks[oldOutletId] || 0) + (oldItem.quantity || 0);
+            modified = true;
+          }
 
-        // Apply new item quantity deduction
-        const newItem = updatedTx.items?.find((i: any) => (i.product?.id || i.productId) === p.id);
-        if (newItem) {
-          outletStocks[newOutletId] = Math.max(0, (outletStocks[newOutletId] || 0) - (newItem.quantity || 0));
-          modified = true;
-        }
+          // Apply new item quantity deduction
+          const newItem = updatedTx.items?.find((i: any) => (i.product?.id || i.productId) === p.id);
+          if (newItem) {
+            outletStocks[newOutletId] = Math.max(0, (outletStocks[newOutletId] || 0) - (newItem.quantity || 0));
+            modified = true;
+          }
 
-        if (!modified) return p;
+          if (!modified) return p;
 
-        const totalToko = Object.values(outletStocks).reduce((a: number, b: number) => a + b, 0);
-        return {
-          ...p,
-          stockToko: totalToko,
-          outletStocks,
-          updatedAt: new Date().toISOString(),
-        };
-      });
+          const totalToko = Object.values(outletStocks).reduce((a: number, b: number) => a + b, 0);
+          return {
+            ...p,
+            stockToko: totalToko,
+            outletStocks,
+            updatedAt: new Date().toISOString(),
+          };
+        });
 
-      setProducts(updatedProducts);
-      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+        currentProducts = updatedProducts;
+        setProducts(updatedProducts);
+        productsRef.current = updatedProducts;
+        safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updatedProducts);
 
-      // Save affected products to Firestore
-      const touchedProductIds = new Set<string>();
-      oldTx.items?.forEach((i: any) => touchedProductIds.add(i.product?.id || i.productId));
-      updatedTx.items?.forEach((i: any) => touchedProductIds.add(i.product?.id || i.productId));
-      touchedProductIds.forEach((prodId) => {
-        const prod = updatedProducts.find((p) => p.id === prodId);
-        if (prod) {
-          saveDocToFirestore(COLLECTIONS.PRODUCTS, prod).catch(console.warn);
-        }
-      });
+        // Save affected products to Firestore
+        const touchedProductIds = new Set<string>();
+        oldTx.items?.forEach((i: any) => {
+          const id = i.product?.id || i.productId;
+          if (id) touchedProductIds.add(id);
+        });
+        updatedTx.items?.forEach((i: any) => {
+          const id = i.product?.id || i.productId;
+          if (id) touchedProductIds.add(id);
+        });
+        touchedProductIds.forEach((prodId) => {
+          const prod = updatedProducts.find((p) => p.id === prodId);
+          if (prod) {
+            saveDocToFirestore(COLLECTIONS.PRODUCTS, prod).catch(console.warn);
+          }
+        });
+      }
+
+      const normalizedTx = normalizeTransactionRecord(updatedTx, currentProducts);
+      
+      const exists = transactions.some((t) => t.id === normalizedTx.id);
+      const updated = exists 
+        ? transactions.map((t) => (t.id === normalizedTx.id ? normalizedTx : t))
+        : [normalizedTx, ...transactions];
+
+      updated.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      setTransactions(updated);
+      safeLocalStorageSet(STORAGE_KEYS.TRANSACTIONS, updated);
+      await saveDocToFirestore(COLLECTIONS.TRANSACTIONS, normalizedTx);
+      return true;
+    } catch (err) {
+      console.error('Error updating transaction:', err);
+      return false;
     }
-
-    const normalizedTx = normalizeTransactionRecord(updatedTx, products);
-    const updated = transactions.map((t) => (t.id === normalizedTx.id ? normalizedTx : t));
-    updated.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    setTransactions(updated);
-    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updated));
-    saveDocToFirestore(COLLECTIONS.TRANSACTIONS, normalizedTx).catch(console.warn);
   };
 
   // Force Push & Sync All Data to Firestore (Bazaar, Outlets, Channels, Products, Users, etc.)
@@ -1061,7 +1116,7 @@ export function App() {
           currentUser={currentUser}
           onCurrentUserUpdated={(updatedUser) => {
             setCurrentUser(updatedUser);
-            localStorage.setItem(AUTH_STORAGE_KEYS.CURRENT_USER, JSON.stringify(updatedUser));
+            safeLocalStorageSet(AUTH_STORAGE_KEYS.CURRENT_USER, updatedUser);
           }}
         />
       )}

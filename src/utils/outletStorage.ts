@@ -1,5 +1,6 @@
 import { StoreOutlet, SalesChannel } from '../types';
 import { db, COLLECTIONS, syncCollectionToFirestore, saveDocToFirestore, deleteDocFromFirestore } from '../lib/firebase';
+import { safeLocalStorageSet } from './storage';
 
 export const DEFAULT_OUTLETS: StoreOutlet[] = [
   {
@@ -72,13 +73,13 @@ export function getOutlets(): StoreOutlet[] {
       console.error('Error parsing outlets', e);
     }
   }
-  localStorage.setItem(STORAGE_KEYS.OUTLETS, JSON.stringify(DEFAULT_OUTLETS));
+  safeLocalStorageSet(STORAGE_KEYS.OUTLETS, DEFAULT_OUTLETS);
   syncCollectionToFirestore(COLLECTIONS.OUTLETS, DEFAULT_OUTLETS).catch(console.warn);
   return DEFAULT_OUTLETS;
 }
 
 export function saveOutlets(outlets: StoreOutlet[]): void {
-  localStorage.setItem(STORAGE_KEYS.OUTLETS, JSON.stringify(outlets));
+  safeLocalStorageSet(STORAGE_KEYS.OUTLETS, outlets);
   syncCollectionToFirestore(COLLECTIONS.OUTLETS, outlets).catch(console.warn);
 }
 
@@ -153,13 +154,13 @@ export function getChannels(): SalesChannel[] {
       console.error('Error parsing channels', e);
     }
   }
-  localStorage.setItem(STORAGE_KEYS.CHANNELS, JSON.stringify(DEFAULT_CHANNELS));
+  safeLocalStorageSet(STORAGE_KEYS.CHANNELS, DEFAULT_CHANNELS);
   syncCollectionToFirestore(COLLECTIONS.CHANNELS, DEFAULT_CHANNELS).catch(console.warn);
   return DEFAULT_CHANNELS;
 }
 
 export function saveChannels(channels: SalesChannel[]): void {
-  localStorage.setItem(STORAGE_KEYS.CHANNELS, JSON.stringify(channels));
+  safeLocalStorageSet(STORAGE_KEYS.CHANNELS, channels);
   syncCollectionToFirestore(COLLECTIONS.CHANNELS, channels).catch(console.warn);
 }
 

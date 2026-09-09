@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, ChevronLeft, ChevronRight, Image as ImageIcon, Sparkles, Tag } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Image as ImageIcon, Sparkles, Tag, Camera } from 'lucide-react';
 import { Product } from '../types';
 import { getProductImages } from '../data/productPhotoPresets';
 import { formatRupiah } from '../utils/formatters';
@@ -9,6 +9,7 @@ interface ProductPhotoGalleryModalProps {
   onClose: () => void;
   product: Product | null;
   initialPhotoIndex?: number;
+  onOpenChangePhoto?: (product: Product) => void;
 }
 
 export const ProductPhotoGalleryModal: React.FC<ProductPhotoGalleryModalProps> = ({
@@ -16,6 +17,7 @@ export const ProductPhotoGalleryModal: React.FC<ProductPhotoGalleryModalProps> =
   onClose,
   product,
   initialPhotoIndex = 0,
+  onOpenChangePhoto,
 }) => {
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -69,12 +71,29 @@ export const ProductPhotoGalleryModal: React.FC<ProductPhotoGalleryModalProps> =
             </div>
           </div>
           
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors shrink-0 ml-2"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0 ml-2">
+            {onOpenChangePhoto && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenChangePhoto(product);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#9E6B70] border border-rose-200 text-xs font-bold inline-flex items-center gap-1.5 transition-colors shadow-2xs"
+                title="Ganti atau perbarui foto produk ini"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Ganti Foto</span>
+              </button>
+            )}
+
+            <button
+              onClick={onClose}
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Main Photo Viewer */}

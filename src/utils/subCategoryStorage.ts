@@ -1,6 +1,7 @@
 import { ProductCategory } from '../types';
 import { db, COLLECTIONS, saveDocToFirestore } from '../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { safeLocalStorageSet } from './storage';
 
 export const DEFAULT_HIJAB_SUBCATS = [
   'Voal Premium',
@@ -45,7 +46,7 @@ export function getSubCategories(category: ProductCategory | string): string[] {
 
 export function saveSubCategories(category: ProductCategory | string, subcats: string[]): void {
   const key = category === 'Mukena' ? STORAGE_KEYS.MUKENA : STORAGE_KEYS.HIJAB;
-  localStorage.setItem(key, JSON.stringify(subcats));
+  safeLocalStorageSet(key, subcats);
   
   const docId = category === 'Mukena' ? 'mukena' : 'hijab';
   saveDocToFirestore(COLLECTIONS.SUBCATEGORIES, {

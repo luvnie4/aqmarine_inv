@@ -15,7 +15,7 @@ export const SAMPLE_PRODUCTS: Product[] = [
     name: 'Voal Paris Ultrafine Lasercut',
     category: 'Hijab',
     images: [
-      'https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1567401893414-76b7b1e5a7a5?auto=format&fit=crop&w=800&q=80',
       'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?auto=format&fit=crop&w=800&q=80',
     ],
     hpp: 28000,

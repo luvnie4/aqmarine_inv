@@ -13,13 +13,16 @@ import {
   Star,
   AlertCircle,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  History
 } from 'lucide-react';
 import { Product, ProductCategory, StoreOutlet } from '../types';
 import { 
   BOUTIQUE_PHOTO_PRESETS, 
   getProductImages,
-  compressImageFile
+  compressImageFile,
+  isRedBagPhoto,
+  getProductMainImage
 } from '../data/productPhotoPresets';
 import { getOutlets } from '../utils/outletStorage';
 
@@ -46,16 +49,19 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   // Product Photos State (Min 1, Max 4)
   const [images, setImages] = useState<string[]>([]);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [isPresetDrawerOpen, setIsPresetDrawerOpen] = useState(false);
   const [urlInput, setUrlInput] = useState('');
   const [isAddingUrl, setIsAddingUrl] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceSlotRef = useRef<number | null>(null);
 
   // Pricing & Stocks
   const [hpp, setHpp] = useState<number | ''>('');
   const [priceRetail, setPriceRetail] = useState<number | ''>('');
   const [priceGrosir, setPriceGrosir] = useState<number | ''>('');
+  const [initialStock, setInitialStock] = useState<number | ''>('');
   const [outlets, setOutlets] = useState<StoreOutlet[]>([]);
   const [outletStocks, setOutletStocks] = useState<Record<string, number | ''>>({});
   const [minStockAlert, setMinStockAlert] = useState<number | ''>(5);
@@ -88,6 +94,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         setHpp(productToEdit.hpp);
         setPriceRetail(productToEdit.priceRetail);
         setPriceGrosir(productToEdit.priceGrosir);
+        setInitialStock(productToEdit.initialStock !== undefined ? productToEdit.initialStock : (productToEdit.stockToko || 0));
 
         // Load per-outlet stocks
         const initialOutletStocks: Record<string, number | ''> = {};
@@ -112,11 +119,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         setSku(`AQM-HJB-${randCode}`);
         setBarcode(`899100${randCode}`);
         // Default 1 aesthetic photo from preset
-        const defaultPhoto = BOUTIQUE_PHOTO_PRESETS.find(p => p.category === 'Hijab')?.url || 'https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&w=800&q=80';
+        const defaultPhoto = BOUTIQUE_PHOTO_PRESETS.find(p => p.category === 'Hijab')?.url || BOUTIQUE_PHOTO_PRESETS[0].url;
         setImages([defaultPhoto]);
         setHpp(28000);
         setPriceRetail(55000);
         setPriceGrosir(45000);
+        setInitialStock(10);
 
         // Set default stock for each active outlet
         const initialOutletStocks: Record<string, number | ''> = {};
@@ -157,6 +165,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   };
 
   // Photo Handlers
+  const triggerReplaceSlot = (idx: number) => {
+    replaceSlotRef.current = idx;
+    fileInputRef.current?.click();
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -165,26 +178,38 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     setIsUploading(true);
 
     try {
-      const remainingSlots = 4 - images.length;
-      if (remainingSlots <= 0) {
-        setImageError('Maksimal 4 foto per produk. Hapus salah satu foto jika ingin mengganti.');
-        setIsUploading(false);
-        return;
+      if (replaceSlotRef.current !== null && replaceSlotRef.current < images.length) {
+        const file = files[0];
+        const compressed = await compressImageFile(file, 400, 0.65);
+        const slot = replaceSlotRef.current;
+        setImages((prev) => {
+          const updated = [...prev];
+          updated[slot] = compressed;
+          return updated;
+        });
+      } else {
+        const remainingSlots = 4 - images.length;
+        if (remainingSlots <= 0) {
+          setImageError('Maksimal 4 foto per produk. Gunakan tombol Ganti pada foto untuk memperbarui.');
+          setIsUploading(false);
+          return;
+        }
+
+        const filesToProcess: File[] = (Array.from(files) as File[]).slice(0, remainingSlots);
+        const compressedUrls: string[] = [];
+
+        for (const file of filesToProcess) {
+          const compressed = await compressImageFile(file, 400, 0.65);
+          compressedUrls.push(compressed);
+        }
+
+        setImages((prev) => [...prev, ...compressedUrls].slice(0, 4));
       }
-
-      const filesToProcess: File[] = (Array.from(files) as File[]).slice(0, remainingSlots);
-      const compressedUrls: string[] = [];
-
-      for (const file of filesToProcess) {
-        const compressed = await compressImageFile(file, 800, 0.82);
-        compressedUrls.push(compressed);
-      }
-
-      setImages((prev) => [...prev, ...compressedUrls].slice(0, 4));
     } catch {
       setImageError('Gagal memproses gambar. Pastikan format file berupa JPG/PNG/WEBP.');
     } finally {
       setIsUploading(false);
+      replaceSlotRef.current = null;
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -195,24 +220,52 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     const trimmed = urlInput.trim();
     if (!trimmed) return;
 
-    if (images.length >= 4) {
-      setImageError('Maksimal 4 foto per produk.');
-      return;
+    if (replaceSlotRef.current !== null && replaceSlotRef.current < images.length) {
+      const slot = replaceSlotRef.current;
+      setImages((prev) => {
+        const updated = [...prev];
+        updated[slot] = trimmed;
+        return updated;
+      });
+      replaceSlotRef.current = null;
+    } else {
+      if (images.length >= 4) {
+        setImageError('Maksimal 4 foto per produk. Gunakan tombol Ganti pada foto untuk memperbarui.');
+        return;
+      }
+      setImages((prev) => [...prev, trimmed].slice(0, 4));
     }
-
-    setImages((prev) => [...prev, trimmed].slice(0, 4));
     setUrlInput('');
     setIsAddingUrl(false);
     setImageError(null);
   };
 
   const handleSelectPresetPhoto = (photoUrl: string) => {
-    if (images.length >= 4) {
-      setImageError('Maksimal 4 foto per produk. Hapus salah satu foto terlebih dahulu.');
-      return;
-    }
     if (images.includes(photoUrl)) {
       setImageError('Foto ini sudah terpasang.');
+      return;
+    }
+
+    if (replaceSlotRef.current !== null && replaceSlotRef.current < images.length) {
+      const slot = replaceSlotRef.current;
+      setImages((prev) => {
+        const updated = [...prev];
+        updated[slot] = photoUrl;
+        return updated;
+      });
+      replaceSlotRef.current = null;
+      setImageError(null);
+      return;
+    }
+
+    if (images.length === 1 && isRedBagPhoto(images[0])) {
+      setImages([photoUrl]);
+      setImageError(null);
+      return;
+    }
+
+    if (images.length >= 4) {
+      setImageError('Maksimal 4 foto per produk. Klik Ganti Foto pada slot yang ingin diubah.');
       return;
     }
     setImages((prev) => [...prev, photoUrl].slice(0, 4));
@@ -220,10 +273,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   };
 
   const handleRemovePhoto = (indexToRemove: number) => {
-    if (images.length <= 1) {
-      setImageError('Wajib melampirkan minimal 1 foto produk (tidak boleh kosong).');
-      return;
-    }
     setImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
     setImageError(null);
   };
@@ -240,16 +289,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
+      setNameError('Nama produk wajib diisi!');
       return;
     }
+    setNameError(null);
 
-    // Validate images constraint: min 1, max 4
-    if (images.length === 0) {
-      setImageError('Wajib melampirkan minimal 1 foto produk (maksimal 4 foto).');
-      return;
+    // Sanitize and filter out problematic red bag images
+    const validImages = images.filter((img) => Boolean(img) && !isRedBagPhoto(img)).slice(0, 4);
+    let finalImages = validImages;
+    if (finalImages.length === 0) {
+      finalImages = [getProductMainImage({ name, category })];
     }
-
-    const finalImages = images.slice(0, 4);
 
     // Prepare numeric outlet stocks
     const finalOutletStocks: Record<string, number> = {};
@@ -269,9 +319,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       priceRetail: Number(priceRetail) || 0,
       priceGrosir: Number(priceGrosir) || 0,
       stockToko: calculatedTotalStockToko,
-      initialStock: productToEdit?.initialStock !== undefined 
-        ? productToEdit.initialStock 
-        : calculatedTotalStockToko,
+      initialStock: typeof initialStock === 'number' 
+        ? initialStock 
+        : (productToEdit?.initialStock !== undefined ? productToEdit.initialStock : calculatedTotalStockToko),
       incomingStock: productToEdit?.incomingStock || 0,
       lastOpnameAt: productToEdit?.lastOpnameAt,
       outletStocks: finalOutletStocks,
@@ -359,9 +409,20 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               required
               placeholder="Contoh: Pashmina Ceruty Babydoll, Mukena Silk Sutra, Voal Paris Ultrafine..."
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#9D6C72]/20"
+              onChange={(e) => {
+                setName(e.target.value);
+                if (nameError) setNameError(null);
+              }}
+              className={`w-full px-3.5 py-2.5 bg-slate-50 border rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 ${
+                nameError ? 'border-rose-500 focus:ring-rose-200' : 'border-slate-200 focus:ring-[#9D6C72]/20'
+              }`}
             />
+            {nameError && (
+              <p className="text-xs text-rose-600 font-semibold mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5" />
+                {nameError}
+              </p>
+            )}
           </div>
 
           {/* 3. SKU, Barcode, Satuan */}
@@ -531,7 +592,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               {images.map((imgUrl, idx) => (
                 <div 
                   key={idx} 
-                  className="relative group bg-white rounded-2xl border-2 border-slate-200 p-1.5 shadow-xs flex flex-col justify-between overflow-hidden"
+                  className="relative group bg-white rounded-2xl border-2 border-slate-200 p-1.5 shadow-xs flex flex-col justify-between overflow-hidden hover:border-[#9D6C72] transition-all"
                 >
                   <div className="relative aspect-square rounded-xl overflow-hidden bg-slate-100">
                     <img
@@ -551,7 +612,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleSetMainPhoto(idx)}
-                        className="absolute top-1 left-1 bg-black/60 hover:bg-[#9D6C72] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-all"
+                        className="absolute top-1 left-1 bg-black/60 hover:bg-[#9D6C72] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-xs transition-all"
                         title="Jadikan Foto Utama / Cover"
                       >
                         Set Utama
@@ -562,10 +623,21 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     <button
                       type="button"
                       onClick={() => handleRemovePhoto(idx)}
-                      className="absolute top-1 right-1 p-1 bg-rose-600/90 hover:bg-rose-700 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-all shadow-md"
-                      title={images.length <= 1 ? "Min 1 foto diperlukan" : "Hapus Foto"}
+                      className="absolute top-1 right-1 p-1 bg-rose-600/90 hover:bg-rose-700 text-white rounded-lg shadow-md transition-all"
+                      title="Hapus Foto"
                     >
                       <Trash2 className="w-3 h-3" />
+                    </button>
+
+                    {/* Quick Replace Button at bottom overlay */}
+                    <button
+                      type="button"
+                      onClick={() => triggerReplaceSlot(idx)}
+                      className="absolute bottom-1 left-1 right-1 py-1 px-1.5 bg-black/75 hover:bg-[#9D6C72] text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 backdrop-blur-xs transition-colors shadow-xs"
+                      title="Ganti foto ini dengan foto lain"
+                    >
+                      <RefreshCw className="w-2.5 h-2.5" />
+                      <span>Ganti</span>
                     </button>
                   </div>
 
@@ -578,7 +650,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               {/* Upload Slot Button if < 4 */}
               {images.length < 4 && (
                 <div
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => {
+                    replaceSlotRef.current = null;
+                    fileInputRef.current?.click();
+                  }}
                   className="aspect-square border-2 border-dashed border-rose-300 hover:border-[#9D6C72] hover:bg-rose-50/50 rounded-2xl flex flex-col items-center justify-center p-3 text-center cursor-pointer transition-all group"
                 >
                   <input
@@ -673,14 +748,42 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             </div>
 
             {/* Minimum Alert & Total Stock Header */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Card 1: Stok Awal (Baseline Awal Periode) */}
+              <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200 shadow-2xs">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-amber-900 flex items-center gap-1">
+                    <History className="w-3.5 h-3.5 text-amber-600" />
+                    Stok Awal (Baseline):
+                  </label>
+                  <span className="text-[9px] text-amber-700 font-semibold">Awal Periode</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    value={initialStock}
+                    onChange={(e) => setInitialStock(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-base font-black text-amber-950 focus:ring-2 focus:ring-amber-400/20"
+                    placeholder="0"
+                  />
+                  <span className="text-xs font-semibold text-amber-800 shrink-0">
+                    {unit}
+                  </span>
+                </div>
+                <span className="text-[9px] text-amber-700 block mt-1">
+                  Stok saat awal periode / didaftarkan
+                </span>
+              </div>
+
+              {/* Card 2: Peringatan Minimum */}
               <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
                     <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
-                    Peringatan Minimum (Alert):
+                    Batas Minimum:
                   </label>
-                  <span className="text-[10px] text-slate-400 font-semibold">Batas Tipis</span>
+                  <span className="text-[9px] text-slate-400 font-semibold">Stok Tipis</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -694,13 +797,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     {unit}
                   </span>
                 </div>
+                <span className="text-[9px] text-slate-400 block mt-1">
+                  Peringatan jika stok menipis
+                </span>
               </div>
 
+              {/* Card 3: Total Stok Berjalan */}
               <div className="p-3 bg-emerald-50/90 rounded-xl border border-emerald-200/90 shadow-2xs flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
                     <Store className="w-3.5 h-3.5 text-emerald-700" />
-                    Total Keseluruhan Stok:
+                    Total Fisik Toko:
                   </span>
                   <span className="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-200/80 text-emerald-900 rounded-md">
                     {outlets.length} Toko
@@ -710,6 +817,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <span>{calculatedTotalStockToko}</span>
                   <span className="text-xs font-semibold text-emerald-700">{unit}</span>
                 </div>
+                <span className="text-[9px] text-emerald-800 block mt-1">
+                  Sesuai alokasi toko di bawah
+                </span>
               </div>
             </div>
 

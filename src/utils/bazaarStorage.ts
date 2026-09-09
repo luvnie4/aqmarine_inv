@@ -1,5 +1,6 @@
 import { BazaarEvent } from '../types';
 import { db, COLLECTIONS, syncCollectionToFirestore, saveDocToFirestore, deleteDocFromFirestore } from '../lib/firebase';
+import { safeLocalStorageSet } from './storage';
 
 export const DEFAULT_BAZAAR_EVENTS: BazaarEvent[] = [];
 
@@ -27,7 +28,7 @@ export function getBazaarEvents(): BazaarEvent[] {
       if (Array.isArray(parsed)) {
         const cleaned = filterOutDummyBazaars(parsed);
         if (cleaned.length !== parsed.length) {
-          localStorage.setItem(BAZAAR_STORAGE_KEY, JSON.stringify(cleaned));
+          safeLocalStorageSet(BAZAAR_STORAGE_KEY, cleaned);
         }
         return cleaned;
       }
@@ -40,7 +41,7 @@ export function getBazaarEvents(): BazaarEvent[] {
 
 export function saveBazaarEvents(events: BazaarEvent[]): void {
   const cleaned = filterOutDummyBazaars(events);
-  localStorage.setItem(BAZAAR_STORAGE_KEY, JSON.stringify(cleaned));
+  safeLocalStorageSet(BAZAAR_STORAGE_KEY, cleaned);
   syncCollectionToFirestore(COLLECTIONS.BAZAARS, cleaned).catch(console.warn);
 }
 

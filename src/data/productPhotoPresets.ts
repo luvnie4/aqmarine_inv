@@ -20,9 +20,29 @@ export const BOUTIQUE_PHOTO_PRESETS: PhotoPreset[] = [
     category: 'Hijab',
     subCategory: 'Voal Premium',
     colorName: 'Sage Green',
-    url: 'https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&w=800&q=80',
-    thumbUrl: 'https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&w=200&q=80',
+    url: 'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?auto=format&fit=crop&w=800&q=80',
+    thumbUrl: 'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?auto=format&fit=crop&w=200&q=80',
     description: 'Voal premium hijau sage tekstur halus'
+  },
+  {
+    id: 'preset-motif-syari',
+    name: 'Motif Premium Syar\'i Mewah',
+    category: 'Hijab',
+    subCategory: 'Khimar / Syar\'i',
+    colorName: 'Rose Dust Motif',
+    url: 'https://images.unsplash.com/photo-1509631179647-0177331693ae?auto=format&fit=crop&w=800&q=80',
+    thumbUrl: 'https://images.unsplash.com/photo-1509631179647-0177331693ae?auto=format&fit=crop&w=200&q=80',
+    description: 'Hijab motif elegan lebar syar\'i anggun'
+  },
+  {
+    id: 'preset-pashmina-tencel',
+    name: 'Pashmina Tencel Silk Shimmer',
+    category: 'Hijab',
+    subCategory: 'Pashmina',
+    colorName: 'Champagne Silk',
+    url: 'https://images.unsplash.com/photo-1528459801416-a9e53bbf4e17?auto=format&fit=crop&w=800&q=80',
+    thumbUrl: 'https://images.unsplash.com/photo-1528459801416-a9e53bbf4e17?auto=format&fit=crop&w=200&q=80',
+    description: 'Pashmina serat tencel halus jatuh lembut berkilau'
   },
   {
     id: 'preset-voal-sage-2',
@@ -168,38 +188,66 @@ export const BOUTIQUE_PHOTO_PRESETS: PhotoPreset[] = [
   }
 ];
 
+export const RED_BAG_URL_SUBSTRING = 'photo-1584917865442-de89df76afd3';
+
+export function isRedBagPhoto(url?: string | null): boolean {
+  if (!url) return false;
+  return url.includes(RED_BAG_URL_SUBSTRING);
+}
+
 // Fallback images based on category
 export const DEFAULT_CATEGORY_FALLBACKS: Record<ProductCategory, string> = {
-  Hijab: 'https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&w=600&q=80',
+  Hijab: 'https://images.unsplash.com/photo-1567401893414-76b7b1e5a7a5?auto=format&fit=crop&w=600&q=80',
   Mukena: 'https://images.unsplash.com/photo-1598300042247-d088f8ab3a91?auto=format&fit=crop&w=600&q=80'
 };
 
 // Safe helper to get the primary or index-specific product photo
 export function getProductMainImage(product: Partial<Product> | null | undefined): string {
   if (!product) return DEFAULT_CATEGORY_FALLBACKS.Hijab;
-  if (product.images && product.images.length > 0 && product.images[0]) {
-    return product.images[0];
+
+  // 1. Check valid images array
+  if (product.images && product.images.length > 0) {
+    const validImg = product.images.find(img => img && !isRedBagPhoto(img));
+    if (validImg) return validImg;
   }
-  if (product.image) {
+
+  // 2. Check single image property
+  if (product.image && !isRedBagPhoto(product.image)) {
     return product.image;
   }
+
+  // 3. Name-aware aesthetic fallback
+  const nameLower = (product.name || '').toLowerCase();
+  if (nameLower.includes("syar'i") || nameLower.includes('syari') || nameLower.includes('khimar')) {
+    return 'https://images.unsplash.com/photo-1509631179647-0177331693ae?auto=format&fit=crop&w=800&q=80';
+  }
+  if (nameLower.includes('pashmina') || nameLower.includes('tencel') || nameLower.includes('silk')) {
+    return 'https://images.unsplash.com/photo-1528459801416-a9e53bbf4e17?auto=format&fit=crop&w=800&q=80';
+  }
+
   return DEFAULT_CATEGORY_FALLBACKS[product.category || 'Hijab'];
 }
 
 // Get all images array normalized (1 to 4 images)
 export function getProductImages(product: Partial<Product> | null | undefined): string[] {
   if (!product) return [DEFAULT_CATEGORY_FALLBACKS.Hijab];
+
+  let validImages: string[] = [];
   if (product.images && product.images.length > 0) {
-    return product.images.filter(Boolean).slice(0, 4);
+    validImages = product.images.filter(img => Boolean(img) && !isRedBagPhoto(img));
+  } else if (product.image && !isRedBagPhoto(product.image)) {
+    validImages = [product.image];
   }
-  if (product.image) {
-    return [product.image];
+
+  if (validImages.length > 0) {
+    return validImages.slice(0, 4);
   }
-  return [DEFAULT_CATEGORY_FALLBACKS[product.category || 'Hijab']];
+
+  return [getProductMainImage(product)];
 }
 
-// Client-side image compression to prevent large base64 strings in localStorage
-export async function compressImageFile(file: File, maxWidth = 800, quality = 0.82): Promise<string> {
+// Client-side image compression to prevent large base64 strings from exceeding localStorage quota
+export async function compressImageFile(file: File, maxWidth = 400, quality = 0.65): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -226,7 +274,13 @@ export async function compressImageFile(file: File, maxWidth = 800, quality = 0.
         }
 
         ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+        // If still large (>60KB), downscale further
+        if (dataUrl.length > 60000) {
+          dataUrl = canvas.toDataURL('image/jpeg', 0.50);
+        }
+
         resolve(dataUrl);
       };
       img.onerror = (err) => reject(err);

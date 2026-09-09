@@ -17,7 +17,8 @@ import {
   Layers,
   History,
   TrendingDown,
-  PackagePlus
+  PackagePlus,
+  Camera
 } from 'lucide-react';
 import { Product, StoreOutlet, SaleTransaction } from '../types';
 import { formatRupiah, formatNumber, exportToCSV } from '../utils/formatters';
@@ -36,6 +37,7 @@ interface InventoryViewProps {
   onOpenOpnameWithProduct: (productId: string) => void;
   onOpenRestockWithProduct: (productId: string) => void;
   onImportProducts?: (importedProducts: Product[], replaceAll: boolean) => void;
+  onOpenChangePhoto?: (product: Product) => void;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
@@ -48,6 +50,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onOpenOpnameWithProduct,
   onOpenRestockWithProduct,
   onImportProducts,
+  onOpenChangePhoto,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -144,15 +147,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     const inStock = p.incomingStock || 0;
     const currentStock = p.stockToko;
 
-    // Calculate actual units sold in transactions (since last opname if any)
+    // Calculate actual units sold in transactions (koreksi periodik tidak menghapus riwayat penjualan)
     let txSoldCount = 0;
     if (transactions && transactions.length > 0) {
-      const lastOpnameTime = p.lastOpnameAt ? new Date(p.lastOpnameAt).getTime() : 0;
       for (const tx of transactions) {
-        const txTime = new Date(tx.date || tx.createdAt || 0).getTime();
-        if (lastOpnameTime > 0 && txTime < lastOpnameTime) {
-          continue;
-        }
         if (Array.isArray(tx.items)) {
           for (const item of tx.items) {
             const prodId = item.product?.id || item.productId;
@@ -619,19 +617,35 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <div className="flex items-center gap-3">
                             {/* Product Photo Thumbnail */}
                             <div 
-                              onClick={() => handleOpenGallery(p, 0)}
-                              className="relative group/photo w-11 h-11 rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0 cursor-pointer shadow-2xs hover:ring-2 hover:ring-[#9E6B70] transition-all"
-                              title="Klik untuk melihat foto produk"
+                              className="relative group/photo w-11 h-11 rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0 shadow-2xs hover:ring-2 hover:ring-[#9E6B70] transition-all"
                             >
                               <img
                                 src={getProductMainImage(p)}
                                 alt={p.name}
-                                className="w-full h-full object-cover group-hover/photo:scale-110 transition-transform duration-300"
+                                onClick={() => handleOpenGallery(p, 0)}
+                                className="w-full h-full object-cover group-hover/photo:scale-110 transition-transform duration-300 cursor-pointer"
                                 referrerPolicy="no-referrer"
+                                title="Klik untuk melihat foto produk"
                               />
-                              <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/photo:opacity-100 transition-opacity flex items-center justify-center text-white">
+                              <div 
+                                onClick={() => handleOpenGallery(p, 0)}
+                                className="absolute inset-0 bg-black/30 opacity-0 group-hover/photo:opacity-100 transition-opacity flex items-center justify-center text-white cursor-pointer"
+                              >
                                 <Eye className="w-3.5 h-3.5" />
                               </div>
+                              {onOpenChangePhoto && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onOpenChangePhoto(p);
+                                  }}
+                                  className="absolute bottom-0 right-0 p-1 bg-white/95 hover:bg-[#9E6B70] text-slate-600 hover:text-white rounded-tl-lg shadow-xs transition-colors"
+                                  title="Ganti foto produk ini"
+                                >
+                                  <Camera className="w-2.5 h-2.5" />
+                                </button>
+                              )}
                             </div>
 
                             {/* Details */}
@@ -851,6 +865,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               <Edit3 className="w-4 h-4" />
                             </button>
 
+                            {/* Quick Change Photo button */}
+                            {onOpenChangePhoto && (
+                              <button
+                                id={`photo-action-${p.id}`}
+                                onClick={() => onOpenChangePhoto(p)}
+                                title="Ganti Foto Produk"
+                                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 hover:text-[#9E6B70] transition-colors"
+                              >
+                                <Camera className="w-4 h-4" />
+                              </button>
+                            )}
+
                             {/* Delete button */}
                             {deletingProductId === p.id ? (
                               <div className="flex items-center gap-1 bg-rose-50 p-1 rounded-lg border border-rose-200 animate-in fade-in">
@@ -1058,6 +1084,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         onClose={() => setIsGalleryOpen(false)}
         product={galleryProduct}
         initialPhotoIndex={galleryIndex}
+        onOpenChangePhoto={onOpenChangePhoto}
       />
 
       {/* Import Products Modal */}
