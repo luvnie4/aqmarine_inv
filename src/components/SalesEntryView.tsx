@@ -46,7 +46,7 @@ import {
   UserAccount
 } from '../types';
 import { formatRupiah, formatNumber, generateTransactionCode, toDateInputString, toTimeInputString, formatDateTime } from '../utils/formatters';
-import { getOutlets, getChannels, getDefaultOutlet } from '../utils/outletStorage';
+import { getOutlets, getChannels, getDefaultOutlet, getProductOutletStock } from '../utils/outletStorage';
 import { getBazaarEvents, getActiveBazaar, setActiveBazaarEvent } from '../utils/bazaarStorage';
 import { ManageOutletsModal } from './ManageOutletsModal';
 import { ManageChannelsModal } from './ManageChannelsModal';
@@ -224,7 +224,16 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
     };
   }, []);
 
-  // Active Outlet object
+  // Primary Outlet object (Toko Pusat / TK-01)
+  const primaryOutlet = useMemo(() => {
+    return outlets.find(o => o.isDefault || o.code === 'TK-01') || outlets[0] || {
+      id: 'outlet-main',
+      name: 'Toko Utama AQMARINE',
+      code: 'TK-01',
+    };
+  }, [outlets]);
+
+  // Active Outlet object (for standard offline store channel)
   const activeOutlet = useMemo(() => {
     return outlets.find(o => o.id === selectedOutletId) || outlets[0] || {
       id: 'outlet-main',
@@ -249,10 +258,14 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
     setActiveChannelType(type);
   };
 
-  // Helper to get available stock of a product based on active store outlet
+  // Helper to get available stock of a product based on active channel and outlet
+  // NOTE: Bazaar ALWAYS deducts and reads stock from Toko Pusat (TK-01)
   const getProductStock = (product: Product): number => {
-    if (product.outletStocks && selectedOutletId && product.outletStocks[selectedOutletId] !== undefined) {
-      return product.outletStocks[selectedOutletId];
+    if (activeChannelType === 'bazaar') {
+      return getProductOutletStock(product, primaryOutlet.id, outlets);
+    }
+    if (selectedOutletId) {
+      return getProductOutletStock(product, selectedOutletId, outlets);
     }
     return product.stockToko || 0;
   };
@@ -278,7 +291,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
   // 1-Click Add to List
   const handleAddToCart = (product: Product) => {
     const availableStock = getProductStock(product);
-    const locationLabel = activeOutlet?.name || 'Toko Utama';
+    const locationLabel = activeChannelType === 'bazaar'
+      ? `${primaryOutlet.name} (Bazaar)`
+      : (activeOutlet?.name || 'Toko Utama');
 
     if (availableStock <= 0) {
       showWarning(`Stok produk "${product.name}" di ${locationLabel} kosong.`);
@@ -345,7 +360,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
         .map((item) => {
           if (item.product.id === productId) {
             const availableStock = getProductStock(item.product);
-            const locationLabel = activeOutlet?.name || 'Toko Utama';
+            const locationLabel = activeChannelType === 'bazaar'
+              ? `${primaryOutlet.name} (Bazaar)`
+              : (activeOutlet?.name || 'Toko Utama');
             const newQty = item.quantity + delta;
 
             if (newQty > availableStock) {
@@ -399,7 +416,11 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
       return;
     }
 
-    const locationName = activeOutlet.name;
+    const isBazaarSale = activeChannelType === 'bazaar';
+    const targetDeductedOutlet = isBazaarSale ? primaryOutlet : activeOutlet;
+    const locationName = isBazaarSale
+      ? `${primaryOutlet.name} (Bazaar: ${bazaarName.trim() || 'Event'})`
+      : activeOutlet.name;
     const customChObj = channels.find(c => c.id === selectedCustomChannelId);
 
     // Calculate chosen transaction date & time
@@ -443,11 +464,11 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
       // Sales Channel & Multi-outlet attributes
       salesChannelType: activeChannelType,
       salesChannelName: getChannelDisplayName(),
-      outletId: activeOutlet.id,
-      outletName: activeOutlet.name,
-      bazaarName: activeChannelType === 'bazaar' ? (bazaarName.trim() || 'Bazaar AQMARINE') : undefined,
+      outletId: targetDeductedOutlet.id,
+      outletName: isBazaarSale ? `${primaryOutlet.name} (Bazaar)` : activeOutlet.name,
+      bazaarName: isBazaarSale ? (bazaarName.trim() || 'Bazaar AQMARINE') : undefined,
       customChannelName: activeChannelType === 'custom' ? (customChObj?.name || 'Saluran Kustom') : undefined,
-      stockDeductedOutletId: activeOutlet.id,
+      stockDeductedOutletId: targetDeductedOutlet.id,
       stockDeductedLocationName: locationName,
     };
 
@@ -760,19 +781,10 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-semibold text-slate-600">Ambil dari Toko:</span>
-                  <select
-                    value={selectedOutletId}
-                    onChange={(e) => setSelectedOutletId(e.target.value)}
-                    className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-[11px] font-bold text-slate-800 focus:outline-none"
-                  >
-                    {outlets.map((o) => (
-                      <option key={`bz-out-${o.id}`} value={o.id}>
-                        {o.name}
-                      </option>
-                    ))}
-                  </select>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-100/80 text-amber-950 border border-amber-300 rounded-xl text-xs font-bold shadow-2xs">
+                  <Store className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                  <span>Potong Stok: <strong>{primaryOutlet.name} ({primaryOutlet.code})</strong></span>
+                  <span className="text-[10px] text-amber-900 bg-amber-200/90 px-1.5 py-0.5 rounded font-bold ml-0.5">Otomatis Toko Pusat</span>
                 </div>
               </div>
 

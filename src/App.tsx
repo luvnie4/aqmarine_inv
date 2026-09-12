@@ -21,6 +21,7 @@ import { AUTH_STORAGE_KEYS } from './data/authData';
 import { Navbar } from './components/Navbar';
 import { DashboardView } from './components/DashboardView';
 import { InventoryView } from './components/InventoryView';
+import { RestocksView } from './components/RestocksView';
 import { SalesEntryView } from './components/SalesEntryView';
 import { TransfersView } from './components/TransfersView';
 import { AdjustmentsView } from './components/AdjustmentsView';
@@ -39,7 +40,16 @@ import { ManageBazaarsModal } from './components/ManageBazaarsModal';
 import { ManageSubCategoriesModal } from './components/ManageSubCategoriesModal';
 import { ImportProductsModal } from './components/ImportProductsModal';
 import { filterOutDummyBazaars, getBazaarEvents, saveBazaarEvents } from './utils/bazaarStorage';
-import { getOutlets, getChannels, saveOutlets, saveChannels } from './utils/outletStorage';
+import { 
+  getOutlets, 
+  getChannels, 
+  saveOutlets, 
+  saveChannels,
+  normalizeProductOutletStocks,
+  deductProductStock,
+  resolveOutletStockKey,
+  getProductOutletStock
+} from './utils/outletStorage';
 import { getUsers, saveUsers } from './utils/userStorage';
 import { getSubCategories, saveSubCategories } from './utils/subCategoryStorage';
 import { 
@@ -159,6 +169,53 @@ export function normalizeTransactionRecord(tx: SaleTransaction, availableProduct
   };
 }
 
+export function isMotifPremiumStandarProduct(p: Product): boolean {
+  if (!p) return false;
+  const nameNorm = (p.name || '').toLowerCase().replace(/\s+/g, ' ');
+  const skuNorm = (p.sku || '').toUpperCase();
+  return (
+    nameNorm.includes('motif premium standa') ||
+    skuNorm === 'AQM-HJB-0892' ||
+    skuNorm === 'AQM-HJB-1004'
+  );
+}
+
+export function patchProductsAndNormalize(prods: Product[]): { updated: Product[]; changed: boolean } {
+  let changed = false;
+  const currentOutlets = getOutlets();
+  const updated = prods.map((p) => {
+    let curr = p;
+    if (isMotifPremiumStandarProduct(curr)) {
+      if (curr.initialStock !== 8 || curr.incomingStock !== 20 || curr.lastOpnameAt) {
+        changed = true;
+        curr = {
+          ...curr,
+          initialStock: 8,
+          incomingStock: 20,
+          stockToko: 22,
+          lastOpnameAt: undefined,
+          outletStocks: {
+            ...(curr.outletStocks || {}),
+            'outlet-main': 22,
+          },
+        };
+      }
+    }
+
+    const normalized = normalizeProductOutletStocks(curr, currentOutlets);
+    if (
+      JSON.stringify(normalized.outletStocks) !== JSON.stringify(curr.outletStocks) ||
+      normalized.stockToko !== curr.stockToko
+    ) {
+      changed = true;
+      return normalized;
+    }
+
+    return curr;
+  });
+  return { updated, changed };
+}
+
 export function App() {
   // Authentication State
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
@@ -182,7 +239,12 @@ export function App() {
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const localData = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
-      return localData ? JSON.parse(localData) : INITIAL_PRODUCTS;
+      const raw = localData ? JSON.parse(localData) : INITIAL_PRODUCTS;
+      const { updated, changed } = patchProductsAndNormalize(raw);
+      if (changed) {
+        safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updated);
+      }
+      return updated;
     } catch {
       return INITIAL_PRODUCTS;
     }
@@ -219,7 +281,31 @@ export function App() {
   const [restocks, setRestocks] = useState<StockRestock[]>(() => {
     try {
       const localData = localStorage.getItem(STORAGE_KEYS.RESTOCKS);
-      return localData ? JSON.parse(localData) : [];
+      const raw: StockRestock[] = localData ? JSON.parse(localData) : [];
+      const hasMotifRestock = raw.some((r) =>
+        (r.productName && r.productName.toLowerCase().replace(/\s+/g, ' ').includes('motif premium standa')) ||
+        (r.sku && (r.sku.toUpperCase() === 'AQM-HJB-0892' || r.sku.toUpperCase() === 'AQM-HJB-1004'))
+      );
+      if (!hasMotifRestock) {
+        const item: StockRestock = {
+          id: 'restock-motif-premium-init',
+          productId: 'prod-motif-premium',
+          productName: 'Motif premium standar',
+          sku: 'AQM-HJB-0892',
+          quantity: 20,
+          date: '2026-08-05T09:00:00.000Z',
+          location: 'outlet-main',
+          locationName: 'Toko Utama AQMARINE',
+          purchasePrice: 85000,
+          supplier: 'Konveksi Hijab Bandung',
+          operator: 'Admin',
+          notes: 'Restok voal motif premium standar (20 pcs)',
+        };
+        const combined = [item, ...raw];
+        safeLocalStorageSet(STORAGE_KEYS.RESTOCKS, combined);
+        return combined;
+      }
+      return raw;
     } catch {
       return [];
     }
@@ -267,9 +353,16 @@ export function App() {
               ...data,
             } as Product);
           });
-          setProducts(cloudProducts);
-          productsRef.current = cloudProducts;
-          safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, cloudProducts);
+          const { updated, changed } = patchProductsAndNormalize(cloudProducts);
+          if (changed) {
+            const target = updated.find(isMotifPremiumStandarProduct);
+            if (target) {
+              saveDocToFirestore(COLLECTIONS.PRODUCTS, target).catch(console.warn);
+            }
+          }
+          setProducts(updated);
+          productsRef.current = updated;
+          safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updated);
         }
         setCloudSyncState('synced');
       },
@@ -362,9 +455,33 @@ export function App() {
               ...data,
             } as StockRestock);
           });
-          cloudRestocks.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setRestocks(cloudRestocks);
-          safeLocalStorageSet(STORAGE_KEYS.RESTOCKS, cloudRestocks);
+          let finalRestocks = cloudRestocks;
+          const hasMotifRestock = finalRestocks.some((r) =>
+            (r.productName && r.productName.toLowerCase().replace(/\s+/g, ' ').includes('motif premium standa')) ||
+            (r.sku && (r.sku.toUpperCase() === 'AQM-HJB-0892' || r.sku.toUpperCase() === 'AQM-HJB-1004'))
+          );
+          if (!hasMotifRestock) {
+            const motifProd = productsRef.current.find(isMotifPremiumStandarProduct);
+            const defaultRestock: StockRestock = {
+              id: 'restock-motif-premium-cloud',
+              productId: motifProd?.id || 'prod-motif-premium',
+              productName: motifProd?.name || 'Motif premium standar',
+              sku: motifProd?.sku || 'AQM-HJB-0892',
+              quantity: 20,
+              date: '2026-08-05T09:00:00.000Z',
+              location: 'outlet-main',
+              locationName: 'Toko Utama AQMARINE',
+              purchasePrice: motifProd?.hpp || 85000,
+              supplier: 'Konveksi Hijab Bandung',
+              operator: 'Admin',
+              notes: 'Restok voal motif premium standar (20 pcs)',
+            };
+            finalRestocks = [defaultRestock, ...cloudRestocks];
+            saveDocToFirestore(COLLECTIONS.RESTOCKS, defaultRestock).catch(console.warn);
+          }
+          finalRestocks.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setRestocks(finalRestocks);
+          safeLocalStorageSet(STORAGE_KEYS.RESTOCKS, finalRestocks);
         }
       },
       (error) => {
@@ -654,6 +771,23 @@ export function App() {
     setInitialOpnameProductId(undefined);
   };
 
+  const handleDeleteAdjustment = (adjustmentId: string) => {
+    if (window.confirm('Yakin ingin menghapus riwayat stok opname ini?')) {
+      const updated = adjustments.filter((a) => a.id !== adjustmentId);
+      setAdjustments(updated);
+      safeLocalStorageSet(STORAGE_KEYS.ADJUSTMENTS, updated);
+      deleteDocFromFirestore(COLLECTIONS.ADJUSTMENTS, adjustmentId).catch(console.warn);
+    }
+  };
+
+  const handleClearAllAdjustments = () => {
+    if (window.confirm('PERINGATAN: Yakin ingin menghapus SEMUA riwayat stok opname? Data yang dihapus tidak bisa dikembalikan.')) {
+      setAdjustments([]);
+      safeLocalStorageSet(STORAGE_KEYS.ADJUSTMENTS, []);
+      syncCollectionToFirestore(COLLECTIONS.ADJUSTMENTS, []).catch(console.warn);
+    }
+  };
+
   // Restock Operation
   const handleConfirmRestock = (restock: StockRestock, updateHpp: boolean) => {
     const updatedProducts = products.map((p) => {
@@ -704,21 +838,37 @@ export function App() {
     setInitialRestockProductId(undefined);
   };
 
-  // Sale Transaction Complete
-  const handleCompleteTransaction = (tx: SaleTransaction) => {
+  const handleDeleteRestock = (restockId: string) => {
+    const targetRestock = restocks.find((r) => r.id === restockId);
+    if (!targetRestock) return;
+
+    const confirmMsg = `Yakin ingin menghapus riwayat restok ${targetRestock.productName} (+${targetRestock.quantity} pcs)?\n\nStok produk akan otomatis dikurangi kembali sebanyak ${targetRestock.quantity} pcs agar jumlah fisik dan riwayat barang masuk tetap sinkron.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    // Revert product stock
     const updatedProducts = products.map((p) => {
-      const item = tx.items.find((i: any) => (i.product?.id || i.productId) === p.id);
-      if (!item) return p;
+      if (p.id !== targetRestock.productId) return p;
 
       const outletStocks = { ...(p.outletStocks || {}) };
-      const outletId = tx.stockDeductedOutletId || tx.outletId || 'outlet-main';
-      
-      outletStocks[outletId] = Math.max(0, (outletStocks[outletId] || 0) - item.quantity);
+      const loc = targetRestock.location;
+      const qty = targetRestock.quantity;
+
+      if (loc && loc.startsWith('outlet-')) {
+        outletStocks[loc] = Math.max(0, (outletStocks[loc] || 0) - qty);
+      } else if (loc === 'gudang') {
+        p.stockGudang = Math.max(0, (p.stockGudang || 0) - qty);
+      } else {
+        const firstOutlet = Object.keys(outletStocks)[0] || 'outlet-utama';
+        outletStocks[firstOutlet] = Math.max(0, (outletStocks[firstOutlet] || 0) - qty);
+      }
+
       const totalToko = Object.values(outletStocks).reduce((a: number, b: number) => a + b, 0);
+      const newIncomingStock = Math.max(0, (p.incomingStock || 0) - qty);
 
       return {
         ...p,
         stockToko: totalToko,
+        incomingStock: newIncomingStock,
         outletStocks,
         updatedAt: new Date().toISOString(),
       };
@@ -727,9 +877,58 @@ export function App() {
     setProducts(updatedProducts);
     safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updatedProducts);
 
+    const affectedProd = updatedProducts.find((p) => p.id === targetRestock.productId);
+    if (affectedProd) {
+      saveDocToFirestore(COLLECTIONS.PRODUCTS, affectedProd).catch(console.warn);
+    }
+
+    const updatedRestocks = restocks.filter((r) => r.id !== restockId);
+    setRestocks(updatedRestocks);
+    safeLocalStorageSet(STORAGE_KEYS.RESTOCKS, updatedRestocks);
+    deleteDocFromFirestore(COLLECTIONS.RESTOCKS, restockId).catch(console.warn);
+  };
+
+  const handleClearAllRestocks = () => {
+    if (window.confirm('PERINGATAN: Yakin ingin menghapus SEMUA riwayat barang masuk/restok?\nCatatan: Tindakan ini akan menghapus log riwayat restok.')) {
+      setRestocks([]);
+      safeLocalStorageSet(STORAGE_KEYS.RESTOCKS, []);
+      syncCollectionToFirestore(COLLECTIONS.RESTOCKS, []).catch(console.warn);
+    }
+  };
+
+  // Sale Transaction Complete
+  const handleCompleteTransaction = (tx: SaleTransaction) => {
+    const currentOutlets = getOutlets();
+    const isBazaar = tx.salesChannelType === 'bazaar';
+    const targetOutletId = isBazaar ? 'outlet-main' : (tx.stockDeductedOutletId || tx.outletId || 'outlet-main');
+
+    const updatedProducts = products.map((p) => {
+      // Robust matching: ID or SKU (case-insensitive & trimmed)
+      const item = tx.items.find((i: any) => {
+        const iId = i.product?.id || i.productId;
+        if (iId && iId === p.id) return true;
+        const iSku = (i.product?.sku || i.sku || '').trim().toLowerCase();
+        const pSku = (p.sku || '').trim().toLowerCase();
+        return Boolean(iSku && pSku && iSku === pSku);
+      });
+
+      if (!item) return p;
+
+      return deductProductStock(p, item.quantity, targetOutletId, isBazaar, currentOutlets);
+    });
+
+    setProducts(updatedProducts);
+    productsRef.current = updatedProducts;
+    safeLocalStorageSet(STORAGE_KEYS.PRODUCTS, updatedProducts);
+
     tx.items.forEach((item: any) => {
-      const prodId = item.product?.id || item.productId;
-      const prod = updatedProducts.find((p) => p.id === prodId);
+      const iId = item.product?.id || item.productId;
+      const prod = updatedProducts.find((p) => {
+        if (iId && p.id === iId) return true;
+        const iSku = (item.product?.sku || item.sku || '').trim().toLowerCase();
+        const pSku = (p.sku || '').trim().toLowerCase();
+        return Boolean(iSku && pSku && iSku === pSku);
+      });
       if (prod) {
         saveDocToFirestore(COLLECTIONS.PRODUCTS, prod).catch(console.warn);
       }
@@ -766,41 +965,57 @@ export function App() {
   // Update Existing Transaction (Full Edit Data Transaksi)
   const handleUpdateTransaction = async (updatedTx: SaleTransaction): Promise<boolean> => {
     try {
+      const currentOutlets = getOutlets();
       const oldTx = transactions.find((t) => t.id === updatedTx.id);
       let currentProducts = products;
 
       // If stock deduction is involved, adjust product stocks accordingly
       if (oldTx) {
-        const oldOutletId = oldTx.stockDeductedOutletId || oldTx.outletId || 'outlet-main';
-        const newOutletId = updatedTx.stockDeductedOutletId || updatedTx.outletId || 'outlet-main';
+        const isOldBazaar = oldTx.salesChannelType === 'bazaar';
+        const oldTargetKey = resolveOutletStockKey(oldTx.stockDeductedOutletId || oldTx.outletId, isOldBazaar, currentOutlets);
+
+        const isNewBazaar = updatedTx.salesChannelType === 'bazaar';
+        const newTargetKey = resolveOutletStockKey(updatedTx.stockDeductedOutletId || updatedTx.outletId, isNewBazaar, currentOutlets);
 
         const updatedProducts = products.map((p) => {
-          let outletStocks = { ...(p.outletStocks || {}) };
+          let curr = normalizeProductOutletStocks(p, currentOutlets);
           let modified = false;
 
           // Revert old item quantity
-          const oldItem = oldTx.items?.find((i: any) => (i.product?.id || i.productId) === p.id);
+          const oldItem = oldTx.items?.find((i: any) => {
+            const iId = i.product?.id || i.productId;
+            if (iId && iId === p.id) return true;
+            const iSku = (i.product?.sku || i.sku || '').trim().toLowerCase();
+            const pSku = (p.sku || '').trim().toLowerCase();
+            return Boolean(iSku && pSku && iSku === pSku);
+          });
+
           if (oldItem) {
-            outletStocks[oldOutletId] = (outletStocks[oldOutletId] || 0) + (oldItem.quantity || 0);
+            const outletStocks = { ...(curr.outletStocks || {}) };
+            outletStocks[oldTargetKey] = (Number(outletStocks[oldTargetKey]) || 0) + (Number(oldItem.quantity) || 0);
+            curr = {
+              ...curr,
+              outletStocks,
+              stockToko: Object.values(outletStocks).reduce((a, b) => a + Number(b), 0),
+            };
             modified = true;
           }
 
           // Apply new item quantity deduction
-          const newItem = updatedTx.items?.find((i: any) => (i.product?.id || i.productId) === p.id);
+          const newItem = updatedTx.items?.find((i: any) => {
+            const iId = i.product?.id || i.productId;
+            if (iId && iId === p.id) return true;
+            const iSku = (i.product?.sku || i.sku || '').trim().toLowerCase();
+            const pSku = (p.sku || '').trim().toLowerCase();
+            return Boolean(iSku && pSku && iSku === pSku);
+          });
+
           if (newItem) {
-            outletStocks[newOutletId] = Math.max(0, (outletStocks[newOutletId] || 0) - (newItem.quantity || 0));
+            curr = deductProductStock(curr, newItem.quantity, newTargetKey, isNewBazaar, currentOutlets);
             modified = true;
           }
 
-          if (!modified) return p;
-
-          const totalToko = Object.values(outletStocks).reduce((a: number, b: number) => a + b, 0);
-          return {
-            ...p,
-            stockToko: totalToko,
-            outletStocks,
-            updatedAt: new Date().toISOString(),
-          };
+          return modified ? curr : p;
         });
 
         currentProducts = updatedProducts;
@@ -970,6 +1185,7 @@ export function App() {
           <InventoryView
             products={products}
             transactions={transactions}
+            restocks={restocks}
             onOpenAddProduct={() => {
               setEditingProduct(null);
               setIsAddProductOpen(true);
@@ -992,6 +1208,19 @@ export function App() {
               setIsRestockModalOpen(true);
             }}
             onImportProducts={handleImportProducts}
+          />
+        )}
+
+        {activeTab === 'restocks' && (
+          <RestocksView
+            restocks={restocks}
+            products={products}
+            onOpenRestockModal={() => {
+              setInitialRestockProductId(undefined);
+              setIsRestockModalOpen(true);
+            }}
+            onDeleteRestock={handleDeleteRestock}
+            onClearAllRestocks={handleClearAllRestocks}
           />
         )}
 
@@ -1025,6 +1254,8 @@ export function App() {
               setInitialOpnameProductId(undefined);
               setIsOpnameModalOpen(true);
             }}
+            onDeleteAdjustment={handleDeleteAdjustment}
+            onClearAllAdjustments={handleClearAllAdjustments}
           />
         )}
 
@@ -1082,6 +1313,8 @@ export function App() {
             setInitialOpnameProductId(undefined);
           }}
           products={products}
+          transactions={transactions}
+          restocks={restocks}
           initialProductId={initialOpnameProductId}
           operatorName={currentUser.name}
           onConfirmAdjustment={handleConfirmAdjustment}

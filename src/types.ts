@@ -208,4 +208,4 @@ export interface StockRestock {
   createdAt?: string;
 }
 
-export type ActiveTab = 'dashboard' | 'inventory' | 'sales' | 'pos' | 'transfers' | 'adjustments' | 'reports' | 'profit_loss';
+export type ActiveTab = 'dashboard' | 'inventory' | 'restocks' | 'sales' | 'pos' | 'transfers' | 'adjustments' | 'reports' | 'profit_loss';

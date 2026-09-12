@@ -14,7 +14,8 @@ import {
   AlertCircle,
   RefreshCw,
   ExternalLink,
-  History
+  History,
+  PackagePlus
 } from 'lucide-react';
 import { Product, ProductCategory, StoreOutlet } from '../types';
 import { 
@@ -62,6 +63,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [priceRetail, setPriceRetail] = useState<number | ''>('');
   const [priceGrosir, setPriceGrosir] = useState<number | ''>('');
   const [initialStock, setInitialStock] = useState<number | ''>('');
+  const [incomingStock, setIncomingStock] = useState<number | ''>('');
   const [outlets, setOutlets] = useState<StoreOutlet[]>([]);
   const [outletStocks, setOutletStocks] = useState<Record<string, number | ''>>({});
   const [minStockAlert, setMinStockAlert] = useState<number | ''>(5);
@@ -95,6 +97,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         setPriceRetail(productToEdit.priceRetail);
         setPriceGrosir(productToEdit.priceGrosir);
         setInitialStock(productToEdit.initialStock !== undefined ? productToEdit.initialStock : (productToEdit.stockToko || 0));
+        setIncomingStock(productToEdit.incomingStock || 0);
 
         // Load per-outlet stocks
         const initialOutletStocks: Record<string, number | ''> = {};
@@ -125,6 +128,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         setPriceRetail(55000);
         setPriceGrosir(45000);
         setInitialStock(10);
+        setIncomingStock(0);
 
         // Set default stock for each active outlet
         const initialOutletStocks: Record<string, number | ''> = {};
@@ -322,7 +326,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       initialStock: typeof initialStock === 'number' 
         ? initialStock 
         : (productToEdit?.initialStock !== undefined ? productToEdit.initialStock : calculatedTotalStockToko),
-      incomingStock: productToEdit?.incomingStock || 0,
+      incomingStock: typeof incomingStock === 'number' ? incomingStock : (productToEdit?.incomingStock || 0),
       lastOpnameAt: productToEdit?.lastOpnameAt,
       outletStocks: finalOutletStocks,
       minStockAlert: Number(minStockAlert) || 5,
@@ -748,15 +752,15 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             </div>
 
             {/* Minimum Alert & Total Stock Header */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {/* Card 1: Stok Awal (Baseline Awal Periode) */}
               <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200 shadow-2xs">
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-bold text-amber-900 flex items-center gap-1">
                     <History className="w-3.5 h-3.5 text-amber-600" />
-                    Stok Awal (Baseline):
+                    Stok Awal:
                   </label>
-                  <span className="text-[9px] text-amber-700 font-semibold">Awal Periode</span>
+                  <span className="text-[9px] text-amber-700 font-semibold">Baseline</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -772,11 +776,38 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   </span>
                 </div>
                 <span className="text-[9px] text-amber-700 block mt-1">
-                  Stok saat awal periode / didaftarkan
+                  Awal periode
                 </span>
               </div>
 
-              {/* Card 2: Peringatan Minimum */}
+              {/* Card 2: Stok Masuk (Restok) */}
+              <div className="p-3 bg-sky-50/80 rounded-xl border border-sky-200 shadow-2xs">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-sky-900 flex items-center gap-1">
+                    <PackagePlus className="w-3.5 h-3.5 text-sky-600" />
+                    Restok Masuk:
+                  </label>
+                  <span className="text-[9px] text-sky-700 font-semibold">Berjalan</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    value={incomingStock}
+                    onChange={(e) => setIncomingStock(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="w-full px-3 py-1.5 bg-white border border-sky-300 rounded-lg text-base font-black text-sky-950 focus:ring-2 focus:ring-sky-400/20"
+                    placeholder="0"
+                  />
+                  <span className="text-xs font-semibold text-sky-800 shrink-0">
+                    {unit}
+                  </span>
+                </div>
+                <span className="text-[9px] text-sky-700 block mt-1">
+                  Total restock tercatat
+                </span>
+              </div>
+
+              {/* Card 3: Peringatan Minimum */}
               <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
@@ -798,11 +829,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   </span>
                 </div>
                 <span className="text-[9px] text-slate-400 block mt-1">
-                  Peringatan jika stok menipis
+                  Peringatan stok menipis
                 </span>
               </div>
 
-              {/* Card 3: Total Stok Berjalan */}
+              {/* Card 4: Total Stok Berjalan */}
               <div className="p-3 bg-emerald-50/90 rounded-xl border border-emerald-200/90 shadow-2xs flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
@@ -818,7 +849,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <span className="text-xs font-semibold text-emerald-700">{unit}</span>
                 </div>
                 <span className="text-[9px] text-emerald-800 block mt-1">
-                  Sesuai alokasi toko di bawah
+                  Sesuai alokasi toko
                 </span>
               </div>
             </div>

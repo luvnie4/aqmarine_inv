@@ -20,7 +20,8 @@ import {
   Cloud,
   CloudCheck,
   RefreshCw,
-  Calculator
+  Calculator,
+  Truck
 } from 'lucide-react';
 import { ActiveTab, Product, UserAccount } from '../types';
 import { BrandLogo } from './BrandLogo';
@@ -91,6 +92,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'inventory', label: 'Katalog & Database Stok', icon: Package, badge: products.length },
+    { id: 'restocks', label: '🚚 Restok / Barang Masuk', icon: Truck },
     { id: 'pos', label: 'Input Penjualan', icon: FileSpreadsheet, highlight: true },
     { id: 'transfers', label: 'Mutasi Stok', icon: ArrowLeftRight },
     { id: 'adjustments', label: 'Stok Opname', icon: ClipboardList },
