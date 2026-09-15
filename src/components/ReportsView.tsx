@@ -71,6 +71,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   
   // Category Filter: 'all' | 'Hijab' | 'Mukena' | 'Lainnya'
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [skuFilter, setSkuFilter] = useState<string>('all');
+  const [dateSort, setDateSort] = useState<'desc' | 'asc'>('desc');
 
   // Edit Transaction State (Full Edit Data Transaksi)
   const [editingTransaction, setEditingTransaction] = useState<SaleTransaction | null>(null);
@@ -102,6 +104,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     return map;
   }, [products]);
 
+  const productSkuMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    products.forEach((product) => {
+      map[product.id] = product.sku || '';
+    });
+    return map;
+  }, [products]);
+
   // Helper to determine item category
   const getItemCategory = (item: any): string => {
     if (item.category && item.category !== 'Lainnya' && item.category !== 'Umum') return item.category;
@@ -125,6 +135,30 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     if (item.category) return item.category;
     return 'Lainnya';
   };
+
+  const getItemSku = (item: any): string => {
+    const productId = item.productId || item.product?.id;
+    return String(item.sku || item.product?.sku || (productId ? productSkuMap[productId] : '') || '').trim();
+  };
+
+  const availableSkuOptions = useMemo(() => {
+    const skuNames = new Map<string, string>();
+    products.forEach((product) => {
+      if (product.sku) skuNames.set(product.sku.trim(), product.name);
+    });
+    transactions.forEach((tx) => {
+      tx.items.forEach((item) => {
+        const productId = item.productId || item.product?.id;
+        const sku = String(item.sku || item.product?.sku || (productId ? productSkuMap[productId] : '') || '').trim();
+        if (!sku) return;
+        const name = item.productName || item.product?.name || item.name || skuNames.get(sku) || 'Produk';
+        if (!skuNames.has(sku)) skuNames.set(sku, name);
+      });
+    });
+    return Array.from(skuNames.entries())
+      .map(([sku, name]) => ({ sku, name }))
+      .sort((a, b) => a.sku.localeCompare(b.sku, 'id', { numeric: true }));
+  }, [products, transactions, productSkuMap]);
 
   // Compute available years from transactions + current year
   const availableYears = useMemo(() => {
@@ -232,6 +266,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         }
       }
 
+      if (skuFilter !== 'all') {
+        const hasSkuItem = tx.items.some((item) => getItemSku(item).toLowerCase() === skuFilter.toLowerCase());
+        if (!hasSkuItem) return false;
+      }
+
       // Search query
       const query = searchTerm.toLowerCase();
       if (!query) return true;
@@ -251,7 +290,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       return matchSearch;
     });
-  }, [baseTimeframeTransactions, paymentFilter, channelFilter, selectedOutletId, selectedBazaarName, categoryFilter, searchTerm, productCategoryMap]);
+  }, [baseTimeframeTransactions, paymentFilter, channelFilter, selectedOutletId, selectedBazaarName, categoryFilter, skuFilter, searchTerm, productCategoryMap, productSkuMap]);
+
+  const sortedTransactions = useMemo(() => {
+    return [...filteredTransactions].sort((a, b) => {
+      const comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+      return dateSort === 'asc' ? comparison : -comparison;
+    });
+  }, [filteredTransactions, dateSort]);
 
   const allocateTransactionRevenue = (tx: SaleTransaction) => {
     const items = Array.isArray(tx.items) ? tx.items : [];
@@ -273,26 +319,33 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     });
   };
 
-  const activeCategoryItems = (tx: SaleTransaction) => allocateTransactionRevenue(tx).filter(({ item }) =>
-    categoryFilter === 'all' || getItemCategory(item).toLowerCase() === categoryFilter.toLowerCase()
-  );
+  const itemFilterIsActive = categoryFilter !== 'all' || skuFilter !== 'all';
+
+  const activeFilteredItems = (tx: SaleTransaction) => allocateTransactionRevenue(tx).filter(({ item }) => {
+    const matchesCategory = categoryFilter === 'all' || getItemCategory(item).toLowerCase() === categoryFilter.toLowerCase();
+    const matchesSku = skuFilter === 'all' || getItemSku(item).toLowerCase() === skuFilter.toLowerCase();
+    return matchesCategory && matchesSku;
+  });
+
+  const getFilteredTransactionRevenue = (tx: SaleTransaction) => itemFilterIsActive
+    ? activeFilteredItems(tx).reduce((sum, row) => sum + row.revenue, 0)
+    : Number(tx.total ?? tx.grandTotal ?? tx.subtotal ?? 0);
 
   // Aggregate Metrics for Current Filtered List. When a category is selected,
   // mixed transactions contribute only that category's allocated net revenue.
   const totalOmset = filteredTransactions.reduce((sum, tx) => {
-    if (categoryFilter === 'all') return sum + Number(tx.total ?? tx.grandTotal ?? tx.subtotal ?? 0);
-    return sum + activeCategoryItems(tx).reduce((itemSum, row) => itemSum + row.revenue, 0);
+    return sum + getFilteredTransactionRevenue(tx);
   }, 0);
   
   const totalHpp = filteredTransactions.reduce((sum, tx) => {
-    return sum + activeCategoryItems(tx).reduce((iSum, { item }) => iSum + ((item.hpp || 0) * (item.quantity || 1)), 0);
+    return sum + activeFilteredItems(tx).reduce((iSum, { item }) => iSum + ((item.hpp || 0) * (item.quantity || 1)), 0);
   }, 0);
 
   const totalProfit = totalOmset - totalHpp;
   const profitMargin = totalOmset > 0 ? (totalProfit / totalOmset) * 100 : 0;
   
   const totalItemsSold = filteredTransactions.reduce((sum, tx) => {
-    return sum + activeCategoryItems(tx).reduce((iSum, { item }) => iSum + (item.quantity || 1), 0);
+    return sum + activeFilteredItems(tx).reduce((iSum, { item }) => iSum + (item.quantity || 1), 0);
   }, 0);
 
   const avgBasketSize = filteredTransactions.length > 0 ? totalOmset / filteredTransactions.length : 0;
@@ -408,8 +461,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       'Saluran Penjualan',
       'Detail Outlet / Event',
       'Kategori Produk',
+      'SKU',
       'Item Hijab (pcs)',
       'Item Mukena (pcs)',
+      'Jumlah Item Sesuai Filter (pcs)',
       'Rincian Produk',
       'Pelanggan',
       'No WA',
@@ -417,19 +472,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       'Metode Bayar',
       'Subtotal',
       'Diskon',
-      'Total Akhir',
+      'Penjualan Sesuai Filter',
+      'Total Struk Asli',
       'Estimasi Laba Kotor'
     ];
 
-    const rows = filteredTransactions.map((tx) => {
-      const txHpp = tx.items.reduce((s, i) => s + ((i.hpp || 0) * (i.quantity || 1)), 0);
-      const txProfit = (tx.total || 0) - txHpp;
+    const rows = sortedTransactions.map((tx) => {
+      const visibleRows = activeFilteredItems(tx);
+      const visibleItems = visibleRows.map(({ item }) => item);
+      const filteredRevenue = getFilteredTransactionRevenue(tx);
+      const txHpp = visibleItems.reduce((s, i) => s + ((i.hpp || 0) * (i.quantity || 1)), 0);
+      const txProfit = filteredRevenue - txHpp;
       
       let hijabCount = 0;
       let mukenaCount = 0;
       const categoriesFound: string[] = [];
 
-      tx.items.forEach((item) => {
+      visibleItems.forEach((item) => {
         const cat = getItemCategory(item);
         if (!categoriesFound.includes(cat)) categoriesFound.push(cat);
         if (cat.toLowerCase() === 'hijab') hijabCount += (item.quantity || 1);
@@ -447,7 +506,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         channelType === 'bazaar' ? (tx.bazaarName || 'Event Bazaar') :
         channelType === 'whatsapp' ? 'Online WA' : (tx.customChannelName || '-');
 
-      const itemsDetail = tx.items.map(i => `${i.productName || i.product?.name || i.name || 'Produk'} (${i.quantity || 1} pcs)`).join('; ');
+      const itemSkus = Array.from(new Set(visibleItems.map(getItemSku).filter(Boolean))).join(', ');
+      const visibleItemCount = visibleItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
+      const itemsDetail = visibleItems.map(i => `${i.productName || i.product?.name || i.name || 'Produk'} [${getItemSku(i) || '-'}] (${i.quantity || 1} pcs)`).join('; ');
 
       return [
         tx.transactionNumber,
@@ -455,8 +516,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         channelLabel,
         locationLabel,
         categoriesFound.join(', '),
+        itemSkus,
         hijabCount,
         mukenaCount,
+        visibleItemCount,
         itemsDetail,
         tx.customerName || 'Pelanggan Umum',
         tx.customerPhone || '-',
@@ -464,6 +527,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         tx.paymentMethod,
         tx.subtotal,
         tx.discount || 0,
+        filteredRevenue,
         tx.total,
         txProfit
       ];
@@ -478,6 +542,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     }
     if (categoryFilter !== 'all') {
       filename += `_${categoryFilter}`;
+    }
+    if (skuFilter !== 'all') {
+      filename += `_SKU-${skuFilter}`;
     }
 
     exportToCSV(filename, headers, rows);
@@ -774,6 +841,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 Filter {categoryFilter}
               </span>
             )}
+            {skuFilter !== 'all' && (
+              <span className="px-1.5 py-0.5 bg-slate-900 text-white rounded font-bold text-[10px]">
+                SKU {skuFilter}
+              </span>
+            )}
           </div>
         </div>
 
@@ -805,7 +877,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             {totalItemsSold} <span className="text-sm font-bold text-slate-500">pcs</span>
           </div>
           <div className="text-xs text-slate-500 font-medium">
-            Hijab, Mukena & Produk Lain
+            {skuFilter === 'all' ? 'Hijab, Mukena & Produk Lain' : `Khusus SKU ${skuFilter}`}
           </div>
         </div>
 
@@ -1163,7 +1235,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Cari no. struk, pelanggan, bazaar, produk..."
+                placeholder="Cari no. struk, pelanggan, produk, atau SKU..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-[#9D6C72]"
@@ -1302,8 +1374,31 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               </button>
             </div>
 
-            {/* Payment Filter */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-slate-500">SKU:</span>
+              <select
+                value={skuFilter}
+                onChange={(e) => setSkuFilter(e.target.value)}
+                className="max-w-[260px] px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#9D6C72]"
+                aria-label="Filter berdasarkan SKU"
+              >
+                <option value="all">Semua SKU</option>
+                {availableSkuOptions.map(({ sku, name }) => (
+                  <option key={sku} value={sku}>{sku} — {name}</option>
+                ))}
+              </select>
+
+              <span className="font-bold text-slate-500">Urutan:</span>
+              <select
+                value={dateSort}
+                onChange={(e) => setDateSort(e.target.value as 'desc' | 'asc')}
+                className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-700"
+                aria-label="Urutkan transaksi berdasarkan tanggal"
+              >
+                <option value="desc">Tanggal terbaru</option>
+                <option value="asc">Tanggal terlama</option>
+              </select>
+
               <span className="font-bold text-slate-500">Metode Bayar:</span>
               <select
                 value={paymentFilter}
@@ -1328,12 +1423,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <Receipt className="w-9 h-9 mx-auto text-slate-300 mb-2" />
               <p className="text-xs font-bold text-slate-600">Tidak ada transaksi yang cocok dengan filter aktif.</p>
               <p className="text-[11px] text-slate-400 mt-1">Coba ubah filter saluran, kategori produk, atau periode bulan di atas.</p>
-              {(channelFilter !== 'all' || categoryFilter !== 'all' || searchTerm) && (
+              {(channelFilter !== 'all' || categoryFilter !== 'all' || skuFilter !== 'all' || searchTerm) && (
                 <button
                   onClick={() => {
                     setChannelFilter('all');
-                    setCategoryFilter('all');
-                    setPaymentFilter('all');
+                     setCategoryFilter('all');
+                     setSkuFilter('all');
+                     setPaymentFilter('all');
                     setSelectedOutletId('all');
                     setSelectedBazaarName('all');
                     setSearchTerm('');
@@ -1348,25 +1444,27 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-[10px] font-bold">
-                  <th className="py-3.5 px-4">No. Transaksi & Waktu</th>
+                  <th className="py-3.5 px-4">No. Transaksi & Tanggal</th>
                   <th className="py-3.5 px-4">Saluran & Sumber</th>
                   <th className="py-3.5 px-4">Rincian Item per Kategori</th>
                   <th className="py-3.5 px-4">Pelanggan / Petugas</th>
                   <th className="py-3.5 px-4">Metode Bayar</th>
-                  <th className="py-3.5 px-4 text-right">Total Transaksi</th>
+                  <th className="py-3.5 px-4 text-right">Penjualan Sesuai Filter</th>
                   <th className="py-3.5 px-4 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredTransactions.map((tx) => {
-                  const itemCount = tx.items.reduce((s, i) => s + (i.quantity || 1), 0);
+                {sortedTransactions.map((tx) => {
+                  const visibleRows = activeFilteredItems(tx);
+                  const visibleItems = visibleRows.map(({ item }) => item);
+                  const filteredTxRevenue = getFilteredTransactionRevenue(tx);
                   
                   // Categorize items in this transaction
                   let hijabQtyInTx = 0;
                   let mukenaQtyInTx = 0;
                   let otherQtyInTx = 0;
 
-                  tx.items.forEach((item) => {
+                  visibleItems.forEach((item) => {
                     const cat = getItemCategory(item);
                     const qty = item.quantity || 1;
                     if (cat.toLowerCase() === 'hijab') hijabQtyInTx += qty;
@@ -1440,9 +1538,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           {/* Product Titles Snippet */}
                           <div 
                             className="text-[11px] text-slate-600 max-w-[260px] truncate" 
-                            title={tx.items.map(i => `${i.productName || i.product?.name || i.name || 'Produk'} (${i.quantity || 1} pcs)`).join(', ')}
+                            title={visibleItems.map(i => `${i.productName || i.product?.name || i.name || 'Produk'} [${getItemSku(i) || '-'}] (${i.quantity || 1} pcs)`).join(', ')}
                           >
-                            {tx.items.map(i => `${i.productName || i.product?.name || i.name || 'Produk'} (${i.quantity || 1})`).join(', ')}
+                            {visibleItems.map(i => `${i.productName || i.product?.name || i.name || 'Produk'} · ${getItemSku(i) || 'Tanpa SKU'} (${i.quantity || 1})`).join(', ')}
                           </div>
                         </div>
                       </td>
@@ -1473,8 +1571,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       {/* Total */}
                       <td className="py-3 px-4 text-right">
                         <div className="font-black text-slate-900 text-sm">
-                          {formatRupiah(tx.total)}
-                        </div>
+                            {formatRupiah(filteredTxRevenue)}
+                          </div>
+                          {itemFilterIsActive && (
+                            <div className="text-[10px] text-slate-500 font-medium">
+                              Total struk: {formatRupiah(tx.total)}
+                            </div>
+                          )}
                         {tx.discount && tx.discount > 0 ? (
                           <div className="text-[10px] text-rose-600 font-semibold">
                             Diskon: -{formatRupiah(tx.discount)}
