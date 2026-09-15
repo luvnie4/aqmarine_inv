@@ -16,7 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
-  Sparkles,
+
   Layers,
   MapPin,
   CheckCircle2,
@@ -25,10 +25,11 @@ import {
   Clock,
   RotateCcw,
   X,
-  FileEdit
+  FileEdit,
+  Trash2
 } from 'lucide-react';
 import { SaleTransaction, Product } from '../types';
-import { formatRupiah, formatDateTime, exportToCSV, toDateInputString, toTimeInputString } from '../utils/formatters';
+import { formatRupiah, formatDateTime, exportToCSV, toDateInputString, toTimeInputString, jakartaDateKey, jakartaMonthKey } from '../utils/formatters';
 import { getOutlets } from '../utils/outletStorage';
 import { getBazaarEvents } from '../utils/bazaarStorage';
 import { EditTransactionModal } from './EditTransactionModal';
@@ -37,7 +38,8 @@ interface ReportsViewProps {
   transactions: SaleTransaction[];
   products: Product[];
   onViewReceipt: (transaction: SaleTransaction) => void;
-  onUpdateTransaction?: (transaction: SaleTransaction) => void;
+  onUpdateTransaction?: (transaction: SaleTransaction, previous: SaleTransaction) => Promise<boolean>;
+  onDeleteTransaction?: (transaction: SaleTransaction) => void;
 }
 
 const MONTH_NAMES = [
@@ -50,12 +52,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   products,
   onViewReceipt,
   onUpdateTransaction,
+  onDeleteTransaction,
 }) => {
   const currentDate = new Date();
+  const [currentYearValue, currentMonthValue] = jakartaDateKey(currentDate).split('-').map(Number);
   const [timeframe, setTimeframe] = useState<'today' | 'last7' | 'this_month' | 'monthly' | 'custom_date' | 'all'>('monthly');
   const [filterCustomDate, setFilterCustomDate] = useState<string>(() => toDateInputString(new Date()));
-  const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth() + 1); // 1-12
-  const [selectedYear, setSelectedYear] = useState<number>(currentDate.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonthValue);
+  const [selectedYear, setSelectedYear] = useState<number>(currentYearValue);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
@@ -76,9 +80,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     setEditingTransaction(tx);
   };
 
-  const handleSaveTransaction = (updatedTx: SaleTransaction) => {
+  const handleSaveTransaction = async (updatedTx: SaleTransaction) => {
     if (onUpdateTransaction) {
-      onUpdateTransaction(updatedTx);
+      const saved = await onUpdateTransaction(updatedTx, editingTransaction!);
+      if (!saved) return;
     }
     setEditSuccessMsg(`Data transaksi ${updatedTx.transactionNumber} berhasil diperbarui!`);
     setTimeout(() => setEditSuccessMsg(null), 3500);
@@ -124,17 +129,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   // Compute available years from transactions + current year
   const availableYears = useMemo(() => {
     const yearsSet = new Set<number>();
-    yearsSet.add(currentDate.getFullYear());
-    yearsSet.add(currentDate.getFullYear() - 1);
-    yearsSet.add(currentDate.getFullYear() + 1);
+    yearsSet.add(currentYearValue);
+    yearsSet.add(currentYearValue - 1);
+    yearsSet.add(currentYearValue + 1);
     transactions.forEach((tx) => {
       if (tx.date) {
-        const y = new Date(tx.date).getFullYear();
+        const y = Number(jakartaDateKey(tx.date).slice(0, 4));
         if (!isNaN(y)) yearsSet.add(y);
       }
     });
     return Array.from(yearsSet).sort((a, b) => b - a);
-  }, [transactions, currentDate]);
+  }, [transactions, currentYearValue]);
 
   // Navigate months
   const handlePrevMonth = () => {
@@ -160,11 +165,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   // Helper to compare dates cleanly
   const matchesDay = (isoString: string, targetDateStr: string) => {
     if (!isoString || !targetDateStr) return false;
-    if (isoString.startsWith(targetDateStr)) return true;
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return false;
-    const localDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    return localDateStr === targetDateStr;
+    return jakartaDateKey(isoString) === targetDateStr;
   };
 
   // Base Timeframe Filtered Transactions (before channel/category filters)
@@ -172,7 +173,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const now = new Date();
     const todayDate = toDateInputString(now);
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const thisMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const thisMonthPrefix = jakartaMonthKey(now);
     const selectedMonthlyPrefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
 
     return transactions.filter((tx) => {
@@ -180,14 +181,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       if (timeframe === 'today' && !matchesDay(tx.date, todayDate)) return false;
       if (timeframe === 'last7' && new Date(tx.date) < sevenDaysAgo) return false;
       if (timeframe === 'this_month') {
-        const d = new Date(tx.date);
-        const prefix = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        if (prefix !== thisMonthPrefix) return false;
+        if (jakartaMonthKey(tx.date) !== thisMonthPrefix) return false;
       }
       if (timeframe === 'monthly') {
-        const d = new Date(tx.date);
-        const prefix = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        if (prefix !== selectedMonthlyPrefix) return false;
+        if (jakartaMonthKey(tx.date) !== selectedMonthlyPrefix) return false;
       }
       if (timeframe === 'custom_date' && !matchesDay(tx.date, filterCustomDate)) return false;
       return true;
@@ -256,18 +253,46 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     });
   }, [baseTimeframeTransactions, paymentFilter, channelFilter, selectedOutletId, selectedBazaarName, categoryFilter, searchTerm, productCategoryMap]);
 
-  // Aggregate Metrics for Current Filtered List
-  const totalOmset = filteredTransactions.reduce((sum, tx) => sum + (tx.total || 0), 0);
+  const allocateTransactionRevenue = (tx: SaleTransaction) => {
+    const items = Array.isArray(tx.items) ? tx.items : [];
+    const transactionRevenue = Number(tx.total ?? tx.grandTotal ?? tx.subtotal ?? 0);
+    const bases = items.map(item => {
+      const quantity = Number(item.quantity || 1);
+      return Math.max(0, Number(item.subtotal ?? (Number(item.price ?? item.unitPrice ?? 0) * quantity)));
+    });
+    const baseTotal = bases.reduce((sum, value) => sum + value, 0);
+    let allocated = 0;
+    return items.map((item, index) => {
+      const revenue = index === items.length - 1
+        ? transactionRevenue - allocated
+        : baseTotal > 0
+          ? transactionRevenue * (bases[index] / baseTotal)
+          : items.length > 0 ? transactionRevenue / items.length : 0;
+      allocated += revenue;
+      return { item, revenue };
+    });
+  };
+
+  const activeCategoryItems = (tx: SaleTransaction) => allocateTransactionRevenue(tx).filter(({ item }) =>
+    categoryFilter === 'all' || getItemCategory(item).toLowerCase() === categoryFilter.toLowerCase()
+  );
+
+  // Aggregate Metrics for Current Filtered List. When a category is selected,
+  // mixed transactions contribute only that category's allocated net revenue.
+  const totalOmset = filteredTransactions.reduce((sum, tx) => {
+    if (categoryFilter === 'all') return sum + Number(tx.total ?? tx.grandTotal ?? tx.subtotal ?? 0);
+    return sum + activeCategoryItems(tx).reduce((itemSum, row) => itemSum + row.revenue, 0);
+  }, 0);
   
   const totalHpp = filteredTransactions.reduce((sum, tx) => {
-    return sum + tx.items.reduce((iSum, item) => iSum + ((item.hpp || 0) * (item.quantity || 1)), 0);
+    return sum + activeCategoryItems(tx).reduce((iSum, { item }) => iSum + ((item.hpp || 0) * (item.quantity || 1)), 0);
   }, 0);
 
   const totalProfit = totalOmset - totalHpp;
   const profitMargin = totalOmset > 0 ? (totalProfit / totalOmset) * 100 : 0;
   
   const totalItemsSold = filteredTransactions.reduce((sum, tx) => {
-    return sum + tx.items.reduce((iSum, item) => iSum + (item.quantity || 1), 0);
+    return sum + activeCategoryItems(tx).reduce((iSum, { item }) => iSum + (item.quantity || 1), 0);
   }, 0);
 
   const avgBasketSize = filteredTransactions.length > 0 ? totalOmset / filteredTransactions.length : 0;
@@ -313,24 +338,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       let hasHijabInTx = false;
       let hasMukenaInTx = false;
 
-      tx.items.forEach((item) => {
+      allocateTransactionRevenue(tx).forEach(({ item, revenue }) => {
         const cat = getItemCategory(item);
-        const subtotal = item.subtotal || ((item.price || 0) * (item.quantity || 1));
         const hppTotal = (item.hpp || 0) * (item.quantity || 1);
         const qty = item.quantity || 1;
 
         if (cat.toLowerCase() === 'hijab') {
-          hijabOmset += subtotal;
+          hijabOmset += revenue;
           hijabQty += qty;
           hijabHpp += hppTotal;
           hasHijabInTx = true;
         } else if (cat.toLowerCase() === 'mukena') {
-          mukenaOmset += subtotal;
+          mukenaOmset += revenue;
           mukenaQty += qty;
           mukenaHpp += hppTotal;
           hasMukenaInTx = true;
         } else {
-          othersOmset += subtotal;
+          othersOmset += revenue;
           othersQty += qty;
           othersHpp += hppTotal;
         }
@@ -494,8 +518,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   const isCurrentMonthSelected = 
-    selectedMonth === (currentDate.getMonth() + 1) && 
-    selectedYear === currentDate.getFullYear();
+    selectedMonth === currentMonthValue && 
+    selectedYear === currentYearValue;
 
   // Calculate grand total omset of active timeframe
   const grandTimeframeOmset = baseTimeframeTransactions.reduce((s, tx) => s + (tx.total || 0), 0);
@@ -541,8 +565,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <button
               onClick={() => {
                 setTimeframe('this_month');
-                setSelectedMonth(currentDate.getMonth() + 1);
-                setSelectedYear(currentDate.getFullYear());
+                setSelectedMonth(currentMonthValue);
+                setSelectedYear(currentYearValue);
               }}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                 timeframe === 'this_month' ? 'bg-[#9D6C72] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
@@ -712,8 +736,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             {!isCurrentMonthSelected && (
               <button
                 onClick={() => {
-                  setSelectedMonth(currentDate.getMonth() + 1);
-                  setSelectedYear(currentDate.getFullYear());
+                  setSelectedMonth(currentMonthValue);
+                  setSelectedYear(currentYearValue);
                   setTimeframe('this_month');
                 }}
                 className="px-2.5 py-2 text-[11px] font-bold text-[#9D6C72] bg-white border border-rose-200 rounded-xl hover:bg-rose-50 transition-all shadow-2xs active:scale-95"
@@ -986,7 +1010,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <div className="p-1.5 rounded-xl bg-purple-50 text-purple-600">
-              <Sparkles className="w-4 h-4" />
+              
             </div>
             <div>
               <h2 className="text-sm font-bold text-slate-800">
@@ -1478,6 +1502,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                             >
                               <FileEdit className="w-3.5 h-3.5" />
                               <span>Edit Data</span>
+                            </button>
+                          )}
+                          {onDeleteTransaction && (
+                            <button
+                              onClick={() => onDeleteTransaction(tx)}
+                              className="px-2 py-1.5 bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 border border-rose-200 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-all"
+                              title="Hapus transaksi dan kembalikan stok"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Hapus</span>
                             </button>
                           )}
                         </div>

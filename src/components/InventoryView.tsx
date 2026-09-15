@@ -20,17 +20,16 @@ import {
   PackagePlus,
   Camera
 } from 'lucide-react';
-import { Product, StoreOutlet, SaleTransaction, StockRestock } from '../types';
+import { Product, StoreOutlet, SaleTransaction } from '../types';
 import { formatRupiah, formatNumber, exportToCSV } from '../utils/formatters';
 import { ProductPhotoGalleryModal } from './ProductPhotoGalleryModal';
 import { ImportProductsModal } from './ImportProductsModal';
 import { getProductImages, getProductMainImage } from '../data/productPhotoPresets';
-import { getOutlets, getProductOutletStock as getOutletStockUtil, getProductSalesHistory } from '../utils/outletStorage';
+import { getOutlets } from '../utils/outletStorage';
 
 interface InventoryViewProps {
   products: Product[];
   transactions?: SaleTransaction[];
-  restocks?: StockRestock[];
   onOpenAddProduct: () => void;
   onOpenEditProduct: (product: Product) => void;
   onDeleteProduct: (productId: string) => void;
@@ -44,7 +43,6 @@ interface InventoryViewProps {
 export const InventoryView: React.FC<InventoryViewProps> = ({
   products,
   transactions = [],
-  restocks = [],
   onOpenAddProduct,
   onOpenEditProduct,
   onDeleteProduct,
@@ -70,9 +68,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setOutlets(getOutlets());
   }, []);
 
-  // Helper to get stock for a specific outlet safely
+  // Helper to get stock for a specific outlet
   const getProductOutletStock = (product: Product, outletId: string): number => {
-    return getOutletStockUtil(product, outletId, outlets);
+    if (product.outletStocks && product.outletStocks[outletId] !== undefined) {
+      return product.outletStocks[outletId];
+    }
+    const outlet = outlets.find(o => o.id === outletId);
+    if (outlet?.isDefault) return product.stockToko;
+    return 0;
   };
 
   // Gallery modal state
@@ -141,42 +144,41 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   // Helper to compute comprehensive stock metrics accommodating sales, incoming stock, and initial baseline
   const getProductStockMetrics = (p: Product) => {
-    const isTargetMotif = 
-      (p.name && p.name.toLowerCase().replace(/\s+/g, ' ').includes('motif premium standa')) ||
-      (p.sku && (p.sku.toUpperCase() === 'AQM-HJB-0892' || p.sku.toUpperCase() === 'AQM-HJB-1004'));
+    const inStock = p.incomingStock || 0;
+    const currentStock = p.stockToko;
 
-    let inStock = p.incomingStock || 0;
-    if (restocks && restocks.length > 0) {
-      const loggedQty = restocks
-        .filter((r) => r.productId === p.id || (r.sku && r.sku === p.sku))
-        .reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
-      if (loggedQty > inStock) inStock = loggedQty;
+    // Calculate actual units sold in transactions (koreksi periodik tidak menghapus riwayat penjualan)
+    let txSoldCount = 0;
+    if (transactions && transactions.length > 0) {
+      for (const tx of transactions) {
+        if (Array.isArray(tx.items)) {
+          for (const item of tx.items) {
+            const prodId = item.product?.id || item.productId;
+            if (prodId === p.id) {
+              txSoldCount += Number(item.quantity || 0);
+            }
+          }
+        }
+      }
     }
-
-    if (isTargetMotif) {
-      inStock = p.incomingStock ?? 20;
-    }
-
-    // Accurate calculation of recorded sales transactions (ID, SKU, or Name match)
-    const { totalSold } = getProductSalesHistory(p, transactions || [], outlets);
 
     // Determine initialStock
     let initStock: number;
-    let soldCount: number;
-    let currentStock: number;
-
-    if (isTargetMotif) {
-      initStock = p.initialStock ?? 8;
-      soldCount = Math.max(totalSold, 6);
-      currentStock = Math.max(0, initStock + inStock - soldCount);
+    if (p.initialStock !== undefined) {
+      initStock = p.initialStock;
+    } else if (txSoldCount > 0 || inStock > 0) {
+      initStock = Math.max(0, currentStock + txSoldCount - inStock);
     } else {
-      soldCount = totalSold;
-      if (p.initialStock !== undefined) {
-        initStock = p.initialStock;
-        currentStock = Math.max(0, initStock + inStock - soldCount);
-      } else {
-        initStock = Math.max(0, p.stockToko + soldCount - inStock);
-        currentStock = p.stockToko;
+      initStock = currentStock;
+    }
+
+    // Determine soldCount:
+    // Ground truth is recorded sales transactions. If transactions empty/legacy, derive from (init + in) - current.
+    let soldCount = txSoldCount;
+    if (soldCount === 0) {
+      const implicitDiff = (initStock + inStock) - currentStock;
+      if (implicitDiff > 0) {
+        soldCount = implicitDiff;
       }
     }
 
@@ -195,16 +197,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       map.set(p.id, getProductStockMetrics(p));
     }
     return map;
-  }, [filteredProducts, transactions, restocks, outlets]);
+  }, [filteredProducts, transactions]);
 
   // Aggregate stats
-  const totalStockToko = filteredProducts.reduce((sum, p) => sum + (metricsMap.get(p.id)?.currentStock ?? p.stockToko), 0);
+  const totalStockToko = filteredProducts.reduce((sum, p) => sum + p.stockToko, 0);
   const totalInitialStock = filteredProducts.reduce((sum, p) => sum + (metricsMap.get(p.id)?.initStock || 0), 0);
   const totalIncomingStock = filteredProducts.reduce((sum, p) => sum + (metricsMap.get(p.id)?.incomingStock || 0), 0);
   const totalSold = filteredProducts.reduce((sum, p) => sum + (metricsMap.get(p.id)?.soldCount || 0), 0);
-  const totalValuation = filteredProducts.reduce((sum, p) => sum + ((metricsMap.get(p.id)?.currentStock ?? p.stockToko) * p.hpp), 0);
-  const lowStockCount = products.filter(p => (metricsMap.get(p.id)?.currentStock ?? p.stockToko) <= p.minStockAlert && (metricsMap.get(p.id)?.currentStock ?? p.stockToko) > 0).length;
-  const outOfStockCount = products.filter(p => (metricsMap.get(p.id)?.currentStock ?? p.stockToko) === 0).length;
+  const totalValuation = filteredProducts.reduce((sum, p) => sum + (p.stockToko * p.hpp), 0);
+  const lowStockCount = products.filter(p => p.stockToko <= p.minStockAlert && p.stockToko > 0).length;
+  const outOfStockCount = products.filter(p => p.stockToko === 0).length;
 
   // Handle Export CSV
   const handleExportCSV = () => {
@@ -655,24 +657,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                    <span className="text-[11px] text-slate-400 truncate max-w-[180px]">• {p.notes}</span>
                                 )}
                               </div>
-                              {/* Stock Formula Breakdown */}
-                              <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] font-mono">
-                                <span className="bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.5 rounded font-bold">
-                                  {metrics.initStock} Pcs (Stok Awal)
-                                </span>
-                                <span className="text-slate-400 font-bold">+</span>
-                                <span className="bg-sky-50 text-sky-900 border border-sky-200 px-1.5 py-0.5 rounded font-bold">
-                                  +{metrics.incomingStock} Pcs (Restok)
-                                </span>
-                                <span className="text-slate-400 font-bold">-</span>
-                                <span className="bg-rose-50 text-rose-900 border border-rose-200 px-1.5 py-0.5 rounded font-bold">
-                                  -{metrics.soldCount} Pcs (Terjual)
-                                </span>
-                                <span className="text-slate-400 font-bold">=</span>
-                                <span className="bg-emerald-50 text-emerald-950 border border-emerald-200 px-1.5 py-0.5 rounded font-black">
-                                  {currentDisplayStock} Pcs (Sisa Fisik)
-                                </span>
-                              </div>
                             </div>
                           </div>
                         </td>
@@ -692,7 +676,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             <span className="px-2.5 py-1 rounded-xl font-black text-xs bg-amber-100/80 text-amber-950 border border-amber-200 font-mono">
                               {metrics.initStock} {p.unit}
                             </span>
-                            {p.lastOpnameAt && !((p.name && p.name.toLowerCase().replace(/\s+/g, ' ').includes('motif premium standa')) || (p.sku && (p.sku.toUpperCase() === 'AQM-HJB-0892' || p.sku.toUpperCase() === 'AQM-HJB-1004'))) ? (
+                            {p.lastOpnameAt ? (
                               <span className="text-[9px] text-amber-800 font-semibold mt-0.5" title={`Terakhir opname: ${new Date(p.lastOpnameAt).toLocaleString('id-ID')}`}>
                                 Audit Opname
                               </span>
@@ -749,13 +733,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           {selectedLocationFilter !== 'all' ? (
                             // Specific outlet selected
                             (() => {
-                              let outletStock = getProductOutletStock(p, selectedLocationFilter);
-                              if (selectedLocationFilter === 'outlet-main' && metrics.currentStock !== undefined) {
-                                const otherOutletsStock = outlets
-                                  .filter(other => other.id !== 'outlet-main')
-                                  .reduce((acc, other) => acc + getProductOutletStock(p, other.id), 0);
-                                outletStock = Math.max(0, metrics.currentStock - otherOutletsStock);
-                              }
+                              const outletStock = getProductOutletStock(p, selectedLocationFilter);
                               const currentOutlet = outlets.find(o => o.id === selectedLocationFilter);
 
                               return (
@@ -777,49 +755,35 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             })()
                           ) : (
                             // All outlets view
-                            (() => {
-                              const displayStock = metrics.currentStock ?? p.stockToko;
-                              const isStockOut = displayStock === 0;
-                              const isStockLow = displayStock <= p.minStockAlert && !isStockOut;
+                            <div className="inline-flex flex-col items-center gap-1">
+                              <span className={`px-3 py-1 rounded-xl font-bold text-xs ${
+                                p.stockToko === 0
+                                  ? 'bg-red-100 text-red-900 border border-red-300'
+                                  : isLow 
+                                  ? 'bg-rose-100 text-rose-900 border border-rose-300' 
+                                  : 'bg-emerald-100 text-emerald-950 font-black border border-emerald-200'
+                              }`}>
+                                {p.stockToko} {p.unit}
+                              </span>
 
-                              return (
-                                <div className="inline-flex flex-col items-center gap-1">
-                                  <span className={`px-3 py-1 rounded-xl font-bold text-xs ${
-                                    isStockOut
-                                      ? 'bg-red-100 text-red-900 border border-red-300'
-                                      : isStockLow 
-                                      ? 'bg-rose-100 text-rose-900 border border-rose-300' 
-                                      : 'bg-emerald-100 text-emerald-950 font-black border border-emerald-200'
-                                  }`}>
-                                    {displayStock} {p.unit}
-                                  </span>
-
-                                  {/* Per-outlet breakdown badges if multiple outlets */}
-                                  {outlets.length > 1 && (
-                                    <div className="flex flex-wrap items-center justify-center gap-1 max-w-[220px] mt-0.5">
-                                      {outlets.map((o) => {
-                                        let s = getProductOutletStock(p, o.id);
-                                        if (o.id === 'outlet-main' && metrics.currentStock !== undefined) {
-                                          const otherOutletsStock = outlets
-                                            .filter(other => other.id !== 'outlet-main')
-                                            .reduce((acc, other) => acc + getProductOutletStock(p, other.id), 0);
-                                          s = Math.max(0, metrics.currentStock - otherOutletsStock);
-                                        }
-                                        return (
-                                          <span 
-                                            key={o.id}
-                                            title={`${o.name}: ${s} ${p.unit}`}
-                                            className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 border border-slate-200 text-slate-700 font-mono font-bold"
-                                          >
-                                            {o.code}: <span className={s === 0 ? 'text-red-600' : 'text-emerald-700'}>{s}</span>
-                                          </span>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
+                              {/* Per-outlet breakdown badges if multiple outlets */}
+                              {outlets.length > 1 && (
+                                <div className="flex flex-wrap items-center justify-center gap-1 max-w-[220px] mt-0.5">
+                                  {outlets.map((o) => {
+                                    const s = getProductOutletStock(p, o.id);
+                                    return (
+                                      <span 
+                                        key={o.id}
+                                        title={`${o.name}: ${s} ${p.unit}`}
+                                        className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 border border-slate-200 text-slate-700 font-mono font-bold"
+                                      >
+                                        {o.code}: <span className={s === 0 ? 'text-red-600' : 'text-emerald-700'}>{s}</span>
+                                      </span>
+                                    );
+                                  })}
                                 </div>
-                              );
-                            })()
+                              )}
+                            </div>
                           )}
                         </td>
 

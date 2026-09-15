@@ -1,0 +1,23 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { applySale, applyMovement, revertMovement, stockAt, setStock } from '../src/lib/stock.ts';
+import type { Product, SaleTransaction, StockTransfer, StockAdjustment, StockRestock } from '../src/types';
+const product: Product = { id:'p1', sku:'AQ1', barcode:'1', name:'Hijab', category:'Hijab', hpp:50, priceRetail:100, priceGrosir:90, stockToko:10, stockGudang:5, outletStocks:{'outlet-main':10}, minStockAlert:2, unit:'pcs' };
+const sale = (qty:number, outlet='outlet-main'):SaleTransaction => ({id:'tx1',transactionNumber:'TX1',date:'2026-09-10T00:00:00Z',items:[{productId:'p1',quantity:qty}],subtotal:qty*100,total:qty*100,paymentMethod:'cash',outletId:outlet});
+describe('Konsistensi stok',()=>{
+ it('mengurangi penjualan tanpa mengubah objek sumber',()=>{assert.equal(applySale(product,sale(3)).stockToko,7);assert.equal(product.stockToko,10)});
+ it('menolak stok kurang dan nilai tidak valid',()=>{assert.throws(()=>applySale(product,sale(11)));assert.throws(()=>applySale(product,sale(NaN)));assert.throws(()=>setStock(product,'gudang',-1));assert.throws(()=>setStock(product,'lokasi-salah',2))});
+ it('menggabungkan baris produk yang sama',()=>{const tx=sale(3);tx.items.push({productId:'p1',quantity:2});assert.equal(applySale(product,tx).stockToko,5)});
+ it('edit penjualan mengembalikan stok lama sebelum memotong jumlah baru',()=>{const after=applySale(product,sale(3));assert.equal(applySale(after,sale(5),sale(3)).stockToko,5)});
+ it('edit pindah outlet memulihkan outlet asal',()=>{const before={...product,stockToko:17,outletStocks:{'outlet-main':7,'outlet-2':10}};const result=applySale(before,sale(4,'outlet-2'),sale(3));assert.equal(stockAt(result,'outlet-main'),10);assert.equal(stockAt(result,'outlet-2'),6)});
+ it('mutasi menjaga total stok toko dan gudang',()=>{const result=applyMovement(product,'transfers',{productId:'p1',quantity:3,fromLocation:'gudang',toLocation:'outlet-main'} as StockTransfer);assert.equal(result.stockGudang,2);assert.equal(result.stockToko,13)});
+ it('menolak mutasi ke lokasi sama',()=>assert.throws(()=>applyMovement(product,'transfers',{quantity:2,fromLocation:'gudang',toLocation:'gudang'} as StockTransfer)));
+ it('menolak opname berdasarkan stok yang sudah berubah',()=>assert.throws(()=>applyMovement(product,'adjustments',{location:'outlet-main',previousStock:9,actualStock:8} as StockAdjustment)));
+ it('opname menerima angka nol',()=>assert.equal(applyMovement(product,'adjustments',{location:'outlet-main',previousStock:10,actualStock:0} as StockAdjustment).stockToko,0));
+ it('restock mempertahankan baseline dan menerima harga beli nol',()=>{const result=applyMovement(product,'restocks',{location:'gudang',quantity:2,purchasePrice:0} as StockRestock,true);assert.equal(result.stockGudang,7);assert.equal(result.initialStock,10);assert.equal(result.hpp,0)});
+ it('memahami stok produk lama yang belum punya peta outlet',()=>assert.equal(stockAt({...product,outletStocks:undefined},'outlet-main'),10));
+ it('menghapus penjualan mengembalikan stok',()=>{const after=applySale(product,sale(3));assert.equal(applySale(after,{...sale(3),items:[]},sale(3)).stockToko,10)});
+ it('membalik barang masuk tanpa menggandakan stok',()=>{const record={location:'outlet-main',quantity:4,unitCost:60,previousHpp:50,updateProductHpp:true} as StockRestock;const after=applyMovement(product,'restocks',record,true);const restored=revertMovement(after,'restocks',record);assert.equal(restored.stockToko,10);assert.equal(restored.hpp,50)});
+ it('membalik mutasi ke saldo lokasi semula',()=>{const record={quantity:3,fromLocation:'gudang',toLocation:'outlet-main'} as StockTransfer;const after=applyMovement(product,'transfers',record);const restored=revertMovement(after,'transfers',record);assert.equal(restored.stockGudang,5);assert.equal(restored.stockToko,10)});
+ it('membalik opname hanya bila stok belum berubah lagi',()=>{const record={date:'2026-09-10T01:00:00Z',location:'outlet-main',previousStock:10,actualStock:7,previousInitialStock:10,previousIncomingStock:0} as StockAdjustment;const after=applyMovement(product,'adjustments',record);assert.equal(revertMovement(after,'adjustments',record).stockToko,10);assert.throws(()=>revertMovement(setStock(after,'outlet-main',6),'adjustments',record))});
+});

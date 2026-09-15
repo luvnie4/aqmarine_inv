@@ -11,7 +11,7 @@ import {
   User, 
   Phone,
   Store,
-  Sparkles,
+
   CheckCircle2,
   AlertCircle
 } from 'lucide-react';
@@ -25,10 +25,8 @@ import {
 } from '../utils/bazaarStorage';
 import { 
   COLLECTIONS, 
-  syncCollectionToFirestore, 
-  saveDocToFirestore,
-  deleteDocFromFirestore 
-} from '../lib/firebase';
+  upsertDocuments
+} from '../lib/supabase';
 
 interface ManageBazaarsModalProps {
   isOpen: boolean;
@@ -151,7 +149,6 @@ export const ManageBazaarsModal: React.FC<ManageBazaarsModalProps> = ({
 
       const updatedList = updateBazaarEvent(updatedObj);
       setBazaars(updatedList);
-      syncCollectionToFirestore(COLLECTIONS.BAZAARS, updatedList).catch(console.warn);
       showToast(`Bazaar "${trimmedName}" berhasil diperbarui.`);
       resetForm();
       if (onUpdated) onUpdated();
@@ -168,7 +165,6 @@ export const ManageBazaarsModal: React.FC<ManageBazaarsModalProps> = ({
       });
 
       setBazaars(newBazaars);
-      syncCollectionToFirestore(COLLECTIONS.BAZAARS, newBazaars).catch(console.warn);
       const created = newBazaars.find(b => b.name === trimmedName) || newBazaars[0];
       showToast(`Bazaar "${trimmedName}" berhasil ditambahkan & disimpan!`);
       resetForm();
@@ -185,8 +181,6 @@ export const ManageBazaarsModal: React.FC<ManageBazaarsModalProps> = ({
 
     const updated = deleteBazaarEvent(id);
     setBazaars(updated);
-    deleteDocFromFirestore(COLLECTIONS.BAZAARS, id).catch(console.warn);
-    syncCollectionToFirestore(COLLECTIONS.BAZAARS, updated).catch(console.warn);
     setDeletingId(null);
     showToast(`Bazaar "${target.name}" telah dihapus.`);
     if (onUpdated) onUpdated();
@@ -195,7 +189,7 @@ export const ManageBazaarsModal: React.FC<ManageBazaarsModalProps> = ({
   const handleSelectActive = (bazaar: BazaarEvent) => {
     const updated = setActiveBazaarEvent(bazaar.id);
     setBazaars(updated);
-    syncCollectionToFirestore(COLLECTIONS.BAZAARS, updated).catch(console.warn);
+    upsertDocuments(COLLECTIONS.BAZAARS, updated).catch(console.warn);
     showToast(`Bazaar "${bazaar.name}" dipilih sebagai event aktif.`);
     if (onUpdated) onUpdated();
     if (onSelectBazaar) {
@@ -268,7 +262,7 @@ export const ManageBazaarsModal: React.FC<ManageBazaarsModalProps> = ({
             <form onSubmit={handleSave} className="p-5 bg-amber-50/40 rounded-2xl border border-amber-200/80 space-y-4">
               <div className="flex items-center justify-between pb-2 border-b border-amber-200/60">
                 <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-amber-600" />
+                  
                   {editingId ? 'Edit Data Bazaar / Event' : 'Form Tambah Bazaar / Event Baru'}
                 </span>
                 <button

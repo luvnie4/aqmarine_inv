@@ -17,6 +17,7 @@ export const formatDateTime = (dateStr: string): string => {
   if (!dateStr) return '-';
   const date = new Date(dateStr);
   return new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -29,15 +30,24 @@ export const formatDateOnly = (dateStr: string): string => {
   if (!dateStr) return '-';
   const date = new Date(dateStr);
   return new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   }).format(date);
 };
 
+export const jakartaDateKey = (value: string | Date = new Date()): string => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Jakarta', year:'numeric', month:'2-digit', day:'2-digit' }).format(date);
+};
+
+export const jakartaMonthKey = (value: string | Date = new Date()): string => jakartaDateKey(value).slice(0, 7);
+
 export const generateTransferCode = (): string => {
   const date = new Date();
-  const dateCode = date.toISOString().slice(2, 10).replace(/-/g, '');
+  const dateCode = jakartaDateKey(date).slice(2).replace(/-/g, '');
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   return `TRF-${dateCode}-${randomSuffix}`;
 };
@@ -45,7 +55,7 @@ export const generateTransferCode = (): string => {
 export const generateTransactionCode = (customDate?: Date | string): string => {
   const date = customDate ? new Date(customDate) : new Date();
   const validDate = !isNaN(date.getTime()) ? date : new Date();
-  const dateCode = validDate.toISOString().slice(2, 10).replace(/-/g, '');
+  const dateCode = jakartaDateKey(validDate).slice(2).replace(/-/g, '');
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   return `INV-${dateCode}-${randomSuffix}`;
 };

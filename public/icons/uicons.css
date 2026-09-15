@@ -1,0 +1,54 @@
+/* Flaticon UIcons 4.0.0. https://www.flaticon.com/uicons — attribution in application footer. */
+@font-face {font-family:uicons;src:url("./uicons-regular-rounded.woff2") format("woff2");font-display:block}
+.aq-icon {display:inline-block;flex-shrink:0;font-family:uicons!important;font-style:normal;font-weight:normal;line-height:1;vertical-align:middle}
+.fi-rr-apps:before {
+    content: "\e0c4";
+    }
+.fi-rr-box:before {
+    content: "\e286";
+    }
+.fi-rr-shopping-bag:before {
+    content: "\f193";
+    }
+.fi-rr-exchange:before {
+    content: "\e7a9";
+    }
+.fi-rr-clipboard-list:before {
+    content: "\e4c5";
+    }
+.fi-rr-chart-histogram:before {
+    content: "\e40d";
+    }
+.fi-rr-calculator:before {
+    content: "\e357";
+    }
+.fi-rr-plus:before {
+    content: "\ef85";
+    }
+.fi-rr-refresh:before {
+    content: "\f05e";
+    }
+.fi-rr-sign-out-alt:before {
+    content: "\f1b3";
+    }
+.fi-rr-users:before {
+    content: "\f554";
+    }
+.fi-rr-cloud-check:before {
+    content: "\e4ef";
+    }
+.fi-rr-cloud-disabled:before {
+    content: "\e4f2";
+    }
+.fi-rr-eye:before {
+    content: "\e7bb";
+    }
+.fi-rr-eye-crossed:before {
+    content: "\e7be";
+    }
+.fi-rr-arrow-right:before {
+    content: "\e0ff";
+    }
+.fi-rr-lock:before {
+    content: "\ec4f";
+    }

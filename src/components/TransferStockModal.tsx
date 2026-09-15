@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Product, StockTransfer, LocationType, StoreOutlet } from '../types';
 import { generateTransferCode } from '../utils/formatters';
-import { getOutlets, getProductOutletStock } from '../utils/outletStorage';
+import { getOutlets } from '../utils/outletStorage';
 
 interface TransferStockModalProps {
   isOpen: boolean;
@@ -84,7 +84,12 @@ export const TransferStockModal: React.FC<TransferStockModalProps> = ({
 
   const getStockAtLocation = (loc: string): number => {
     if (!currentProduct) return 0;
-    return getProductOutletStock(currentProduct, loc, outlets);
+    if (currentProduct.outletStocks && currentProduct.outletStocks[loc] !== undefined) {
+      return currentProduct.outletStocks[loc];
+    }
+    const outlet = outlets.find(o => o.id === loc);
+    if (outlet?.isDefault) return currentProduct.stockToko || 0;
+    return 0;
   };
 
   const getLocationLabel = (loc: string): string => {
@@ -132,7 +137,6 @@ export const TransferStockModal: React.FC<TransferStockModalProps> = ({
     };
 
     onConfirmTransfer(transfer);
-    onClose();
   };
 
   return (

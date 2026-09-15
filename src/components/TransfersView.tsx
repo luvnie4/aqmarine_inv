@@ -10,6 +10,7 @@ import {
   ArrowRight,
   User,
   FileText
+  ,Edit2, Trash2
 } from 'lucide-react';
 import { Product, StockTransfer, LocationType } from '../types';
 import { formatDateTime, exportToCSV, generateTransferCode } from '../utils/formatters';
@@ -18,12 +19,16 @@ interface TransfersViewProps {
   products: Product[];
   transfers: StockTransfer[];
   onOpenTransferModal: () => void;
+  onEdit: (record: StockTransfer) => void;
+  onDelete: (record: StockTransfer) => void;
 }
 
 export const TransfersView: React.FC<TransfersViewProps> = ({
   products,
   transfers,
   onOpenTransferModal,
+  onEdit,
+  onDelete,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -160,12 +165,13 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 <th className="py-3.5 px-3 text-center">Arah Mutasi Toko</th>
                 <th className="py-3.5 px-3 text-center">Jumlah</th>
                 <th className="py-3.5 px-4">Petugas & Catatan</th>
+                <th className="py-3.5 px-4 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredTransfers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-400">
+                  <td colSpan={6} className="py-12 text-center text-slate-400">
                     <p className="font-semibold text-sm">Tidak ada riwayat mutasi.</p>
                   </td>
                 </tr>
@@ -218,6 +224,8 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                       )}
                     </td>
 
+                    <td className="py-3.5 px-4"><div className="flex justify-center gap-1"><button onClick={()=>onEdit(t)} className="p-2 rounded-lg bg-amber-50 text-amber-800 hover:bg-amber-100" title="Edit mutasi"><Edit2 className="w-3.5 h-3.5" /></button><button onClick={()=>onDelete(t)} className="p-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100" title="Hapus dan batalkan mutasi"><Trash2 className="w-3.5 h-3.5" /></button></div></td>
+
                   </tr>
                 ))
               )}
@@ -228,4 +236,3 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     </div>
   );
 };
-

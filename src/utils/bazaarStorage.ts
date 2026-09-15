@@ -1,5 +1,5 @@
 import { BazaarEvent } from '../types';
-import { db, COLLECTIONS, syncCollectionToFirestore, saveDocToFirestore, deleteDocFromFirestore } from '../lib/firebase';
+import { COLLECTIONS, upsertDocuments, deleteDocument } from '../lib/supabase';
 import { safeLocalStorageSet } from './storage';
 
 export const DEFAULT_BAZAAR_EVENTS: BazaarEvent[] = [];
@@ -42,7 +42,7 @@ export function getBazaarEvents(): BazaarEvent[] {
 export function saveBazaarEvents(events: BazaarEvent[]): void {
   const cleaned = filterOutDummyBazaars(events);
   safeLocalStorageSet(BAZAAR_STORAGE_KEY, cleaned);
-  syncCollectionToFirestore(COLLECTIONS.BAZAARS, cleaned).catch(console.warn);
+  upsertDocuments(COLLECTIONS.BAZAARS, cleaned).catch(console.warn);
 }
 
 export function getActiveBazaar(): BazaarEvent {
@@ -66,7 +66,6 @@ export function addBazaarEvent(eventData: Omit<BazaarEvent, 'id' | 'createdAt'>)
 
   updated = [newEvent, ...updated];
   saveBazaarEvents(updated);
-  saveDocToFirestore(COLLECTIONS.BAZAARS, newEvent).catch(console.warn);
   return updated;
 }
 
@@ -82,7 +81,6 @@ export function updateBazaarEvent(updatedEvent: BazaarEvent): BazaarEvent[] {
     return e;
   });
   saveBazaarEvents(updated);
-  saveDocToFirestore(COLLECTIONS.BAZAARS, updatedEvent).catch(console.warn);
   return updated;
 }
 
@@ -92,7 +90,7 @@ export function deleteBazaarEvent(eventId: string): BazaarEvent[] {
   if (!filtered.some((e) => e.isActive) && filtered.length > 0) {
     filtered[0].isActive = true;
   }
-  deleteDocFromFirestore(COLLECTIONS.BAZAARS, eventId).catch(console.warn);
+  deleteDocument(COLLECTIONS.BAZAARS, eventId).catch(console.warn);
   saveBazaarEvents(filtered);
   return filtered;
 }
@@ -106,4 +104,3 @@ export function setActiveBazaarEvent(eventId: string): BazaarEvent[] {
   saveBazaarEvents(updated);
   return updated;
 }
-

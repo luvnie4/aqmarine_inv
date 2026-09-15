@@ -1,4 +1,10 @@
 node_modules/
+.npm-cache/
+.gh-config/
+.tools/
+.tools-gh-release.json
+.wrangler-cache/
+.wrangler-config/
 build/
 dist/
 coverage/

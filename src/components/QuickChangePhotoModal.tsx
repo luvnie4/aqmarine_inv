@@ -3,7 +3,7 @@ import {
   X, 
   Upload, 
   Image as ImageIcon, 
-  Sparkles, 
+
   Trash2, 
   Star, 
   Check, 
@@ -392,7 +392,7 @@ export const QuickChangePhotoModal: React.FC<QuickChangePhotoModalProps> = ({
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                
                 <span>2. Galeri Butik ({product.category})</span>
               </button>
               <button

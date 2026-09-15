@@ -6,7 +6,7 @@ import {
   Download, 
   AlertCircle, 
   Check, 
-  Sparkles, 
+
   Layers, 
   RefreshCw, 
   ArrowRight,
@@ -77,7 +77,7 @@ export const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
       const headers = firstLine.split(separator).map(h => h.trim().toLowerCase().replace(/['"]/g, ''));
       
       const outlets = getOutlets();
-      const defaultOutletId = outlets.find(o => o.isDefault)?.id || outlets[0]?.id || 'outlet-main';
+      const defaultOutletId = outlets.find(o => o.isDefault)?.id || outlets[0]?.id || 'outlet-utama';
 
       const results: Product[] = [];
       const timestamp = new Date().toISOString();

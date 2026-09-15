@@ -1,0 +1,19 @@
+import React from 'react';
+interface Props { size?:number; className?:string }
+export const LayoutDashboard = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-apps '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const Package = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-box '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const ShoppingBag = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-shopping-bag '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const ArrowLeftRight = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-exchange '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const ClipboardList = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-clipboard-list '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const ChartNoAxesCombined = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-chart-histogram '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const Calculator = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-calculator '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const Plus = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-plus '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const RefreshCw = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-refresh '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const LogOut = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-sign-out-alt '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const Users = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-users '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const CloudCheck = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-cloud-check '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const CloudOff = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-cloud-disabled '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const Eye = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-eye '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const EyeOff = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-eye-crossed '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const ArrowRight = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-arrow-right '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const LockKeyhole = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-lock '+className} style={{fontSize:size,width:size,height:size}}/>;

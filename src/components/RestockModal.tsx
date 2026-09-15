@@ -18,6 +18,7 @@ interface RestockModalProps {
   products: Product[];
   initialProductId?: string;
   onConfirmRestock: (restock: StockRestock, updateHpp: boolean) => void;
+  operatorName?: string;
 }
 
 export const RestockModal: React.FC<RestockModalProps> = ({
@@ -26,6 +27,7 @@ export const RestockModal: React.FC<RestockModalProps> = ({
   products,
   initialProductId,
   onConfirmRestock,
+  operatorName,
 }) => {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [outlets, setOutlets] = useState<StoreOutlet[]>([]);
@@ -102,11 +104,11 @@ export const RestockModal: React.FC<RestockModalProps> = ({
       supplier: supplier.trim() || 'Konveksi Rekanan',
       unitCost: numCost,
       invoiceNumber: invoiceNumber.trim() || undefined,
+      operator: operatorName || 'Staff Operasional',
       notes: notes.trim() || undefined,
     };
 
     onConfirmRestock(restock, updateProductHpp);
-    onClose();
   };
 
   return (
@@ -269,4 +271,3 @@ export const RestockModal: React.FC<RestockModalProps> = ({
     </div>
   );
 };
-

@@ -9,7 +9,7 @@ import {
   ArrowLeftRight, 
   PlusCircle, 
   Clock, 
-  Sparkles,
+
   Layers,
   ShoppingBag
 } from 'lucide-react';
@@ -49,12 +49,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const retailPotentialToko = products.reduce((sum, p) => sum + ((p.stockToko || 0) * p.priceRetail), 0);
 
   // Sales today
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const todayTransactions = transactions.filter(t => t.date.startsWith(todayStr));
+  const localDay = (value: string | Date) => new Date(value).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+  const todayStr = localDay(new Date());
+  const todayTransactions = transactions.filter(t => localDay(t.date) === todayStr);
   
-  const todayRevenue = todayTransactions.reduce((sum, t) => sum + t.total, 0);
+  const todayRevenue = todayTransactions.reduce((sum, t) => sum + (t.total ?? t.grandTotal ?? 0), 0);
   const todayHpp = todayTransactions.reduce((sum, t) => {
-    return sum + t.items.reduce((iSum, item) => iSum + (item.hpp * item.quantity), 0);
+    return sum + t.items.reduce((iSum, item) => iSum + ((item.hpp ?? item.product?.hpp ?? 0) * item.quantity), 0);
   }, 0);
   const todayProfit = todayRevenue - todayHpp;
 
@@ -71,49 +72,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Welcome & Quick Action Bar */}
-      <div className="bg-gradient-to-r from-[#9D6C72] via-[#8C5B61] to-[#7B4D53] rounded-3xl p-6 sm:p-8 text-white shadow-lg relative overflow-hidden">
-        {/* Subtle decorative background circle */}
-        <div className="absolute right-0 top-0 translate-x-12 -translate-y-12 w-64 h-64 bg-white/10 rounded-full blur-2xl pointer-events-none" />
-        
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/15 backdrop-blur-md rounded-full text-xs font-semibold text-rose-100">
-              <Sparkles className="w-3.5 h-3.5 text-[#E2C8C6]" />
-              Sistem Manajemen Butik Muslimah
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Ringkasan Inventori & Penjualan Butik
-            </h2>
-            <p className="text-rose-100/90 text-sm max-w-xl leading-relaxed">
-              Pantau pergerakan stok hijab & mukena, omset kasir, dan status ketersediaan barang secara real-time.
-            </p>
-          </div>
-
-          {/* Action Hub */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              id="dashboard-open-pos-btn"
-              onClick={() => setActiveTab('pos')}
-              className="flex items-center gap-2 px-5 py-3 bg-white text-[#8C5B61] hover:bg-rose-50 font-bold rounded-2xl shadow-md active:scale-95 transition-all text-sm"
-            >
-              <ShoppingBag className="w-4 h-4 text-[#8C5B61]" />
-              Input Penjualan (Kasir)
-            </button>
-            <button
-              id="dashboard-open-restock-btn"
-              onClick={onOpenRestock}
-              className="flex items-center gap-2 px-4 py-3 bg-white/20 hover:bg-white/30 text-white backdrop-blur-sm font-semibold rounded-2xl active:scale-95 transition-all text-sm border border-white/20"
-            >
-              <PlusCircle className="w-4 h-4" />
-              Catat Stok Masuk
-            </button>
-          </div>
-        </div>
-      </div>
-
+      <div className="dashboard-welcome"><div><p className="eyebrow">OPERASIONAL BUTIK</p><h2>Hari ini di AQMarine</h2><p>Ringkasan penjualan dan ketersediaan koleksi Anda.</p></div><div className="dashboard-actions"><button className="secondary-button" onClick={onOpenRestock}><PlusCircle size={18}/>Stok masuk</button><button className="primary-button" onClick={() => setActiveTab('pos')}><ShoppingBag size={18}/>Catat penjualan</button></div></div>
       {/* Primary Key Metrics Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="dashboard-metrics grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         
         {/* Metric 1: Stok Toko */}
         <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-xs hover:shadow-md transition-shadow">

@@ -1,6 +1,5 @@
 import { ProductCategory } from '../types';
-import { db, COLLECTIONS, saveDocToFirestore } from '../lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { COLLECTIONS, saveDocument } from '../lib/supabase';
 import { safeLocalStorageSet } from './storage';
 
 export const DEFAULT_HIJAB_SUBCATS = [
@@ -49,7 +48,7 @@ export function saveSubCategories(category: ProductCategory | string, subcats: s
   safeLocalStorageSet(key, subcats);
   
   const docId = category === 'Mukena' ? 'mukena' : 'hijab';
-  saveDocToFirestore(COLLECTIONS.SUBCATEGORIES, {
+  saveDocument(COLLECTIONS.SUBCATEGORIES, {
     id: docId,
     category,
     subcategories: subcats,
@@ -78,4 +77,3 @@ export function resetSubCategoriesToDefault(category: ProductCategory | string):
   saveSubCategories(category, defaults);
   return defaults;
 }
-

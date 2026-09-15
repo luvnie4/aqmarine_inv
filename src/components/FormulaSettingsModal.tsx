@@ -5,7 +5,7 @@ import {
   Save, 
   CheckCircle2, 
   HelpCircle, 
-  Sparkles, 
+
   Crown, 
   PieChart as PieChartIcon, 
   Building2, 
@@ -191,7 +191,7 @@ export const FormulaSettingsModal: React.FC<FormulaSettingsModalProps> = ({
               className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1 whitespace-nowrap self-start sm:self-auto"
               title="Salin persentase rumus tab aktif saat ini ke kategori Hijab & Mukena sekaligus"
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+              
               <span>Terapkan ke Keduanya</span>
             </button>
           </div>

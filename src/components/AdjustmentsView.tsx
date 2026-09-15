@@ -9,8 +9,8 @@ import {
   Calendar, 
   User, 
   AlertTriangle,
-  FileText,
-  Trash2
+  FileText
+  ,Edit2, Trash2
 } from 'lucide-react';
 import { StockAdjustment, LocationType, Product } from '../types';
 import { formatDateTime, exportToCSV } from '../utils/formatters';
@@ -19,16 +19,16 @@ interface AdjustmentsViewProps {
   adjustments: StockAdjustment[];
   products: Product[];
   onOpenOpnameModal: () => void;
-  onDeleteAdjustment?: (id: string) => void;
-  onClearAllAdjustments?: () => void;
+  onEdit: (record: StockAdjustment) => void;
+  onDelete: (record: StockAdjustment) => void;
 }
 
 export const AdjustmentsView: React.FC<AdjustmentsViewProps> = ({
   adjustments,
   products,
   onOpenOpnameModal,
-  onDeleteAdjustment,
-  onClearAllAdjustments,
+  onEdit,
+  onDelete,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -109,17 +109,6 @@ export const AdjustmentsView: React.FC<AdjustmentsViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5">
-          {adjustments.length > 0 && onClearAllAdjustments && (
-            <button
-              onClick={onClearAllAdjustments}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-all cursor-pointer shadow-2xs active:scale-95"
-              title="Hapus seluruh riwayat stok opname"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-              <span>Hapus Riwayat Opname</span>
-            </button>
-          )}
-
           <button
             onClick={handleExportCSV}
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
@@ -165,7 +154,7 @@ export const AdjustmentsView: React.FC<AdjustmentsViewProps> = ({
                 <th className="py-3.5 px-3 text-center">Selisih</th>
                 <th className="py-3.5 px-3">Alasan</th>
                 <th className="py-3.5 px-4">Petugas & Catatan</th>
-                <th className="py-3.5 px-3 text-center">Aksi</th>
+                <th className="py-3.5 px-4 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -232,19 +221,7 @@ export const AdjustmentsView: React.FC<AdjustmentsViewProps> = ({
                         </div>
                       )}
                     </td>
-
-                    <td className="py-3.5 px-3 text-center">
-                      {onDeleteAdjustment && (
-                        <button
-                          onClick={() => onDeleteAdjustment(a.id)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-all active:scale-95 cursor-pointer shadow-2xs"
-                          title="Hapus riwayat opname ini"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                          <span>Hapus</span>
-                        </button>
-                      )}
-                    </td>
+                    <td className="py-3.5 px-4"><div className="flex justify-center gap-1"><button onClick={()=>onEdit(a)} className="p-2 rounded-lg bg-amber-50 text-amber-800 hover:bg-amber-100" title="Edit opname"><Edit2 className="w-3.5 h-3.5" /></button><button onClick={()=>onDelete(a)} className="p-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100" title="Hapus dan batalkan opname"><Trash2 className="w-3.5 h-3.5" /></button></div></td>
                   </tr>
                 ))
               )}

@@ -7,7 +7,7 @@ import {
   Edit2, 
   Check, 
   Store, 
-  Sparkles,
+
   MessageCircle,
   Tent,
   ShoppingBag

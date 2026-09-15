@@ -18,7 +18,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
-  Sparkles,
+
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
@@ -1034,7 +1034,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                   onClick={() => setIsManualAddOpen(!isManualAddOpen)}
                   className="text-xs font-bold text-[#9D6C72] hover:text-[#8B5E64] inline-flex items-center gap-1 transition-colors"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
+                  
                   <span>{isManualAddOpen ? 'Tutup Form Barang Bebas' : '+ Tambah Barang Bebas / Kustom (Tanpa Katalog)'}</span>
                   {isManualAddOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 </button>

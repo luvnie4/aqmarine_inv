@@ -13,7 +13,7 @@ import {
   Download, 
   Printer, 
   Info, 
-  Sparkles, 
+
   Package, 
   ArrowUpRight, 
   CheckCircle2, 
@@ -27,7 +27,7 @@ import {
   Settings
 } from 'lucide-react';
 import { SaleTransaction, Product, UserAccount } from '../types';
-import { formatRupiah, formatNumber, exportToCSV } from '../utils/formatters';
+import { formatRupiah, formatNumber, exportToCSV, jakartaDateKey, jakartaMonthKey } from '../utils/formatters';
 import { 
   ProfitFormulaSettings, 
   getProfitFormulaSettings, 
@@ -80,8 +80,9 @@ export const ProfitLossView: React.FC<ProfitLossViewProps> = ({
 
   // Month & Year state (Defaults to current month / bulan berjalan)
   const now = new Date();
-  const currentMonth = now.getMonth() + 1; // 1-12
-  const currentYear = now.getFullYear();
+  const [currentYearValue, currentMonthValue] = jakartaDateKey(now).split('-').map(Number);
+  const currentMonth = currentMonthValue;
+  const currentYear = currentYearValue;
 
   const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
   const [selectedYear, setSelectedYear] = useState<number>(currentYear);
@@ -115,6 +116,7 @@ export const ProfitLossView: React.FC<ProfitLossViewProps> = ({
     products.forEach((p) => {
       map.set(p.id, p);
       if (p.sku) map.set(p.sku, p);
+      map.set(p.name.trim().toLowerCase(), p);
     });
     return map;
   }, [products]);
@@ -126,10 +128,7 @@ export const ProfitLossView: React.FC<ProfitLossViewProps> = ({
     return transactions.filter((tx) => {
       if (!tx.date) return false;
       // Extract YYYY-MM
-      const txDate = new Date(tx.date);
-      if (isNaN(txDate.getTime())) return false;
-      const prefix = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}`;
-      return prefix === targetMonthPrefix;
+      return jakartaMonthKey(tx.date) === targetMonthPrefix;
     });
   }, [transactions, targetMonthPrefix]);
 
@@ -146,17 +145,30 @@ export const ProfitLossView: React.FC<ProfitLossViewProps> = ({
     }>();
 
     periodTransactions.forEach((tx) => {
-      if (!Array.isArray(tx.items)) return;
+      if (!Array.isArray(tx.items) || tx.items.length === 0) return;
 
-      tx.items.forEach((item: any) => {
+      const transactionRevenue = Number(tx.total ?? tx.grandTotal ?? tx.subtotal ?? 0);
+      const revenueBases = tx.items.map((item: any) => {
+        const qty = Number(item.quantity || 1);
+        return Math.max(0, Number(item.subtotal ?? (Number(item.price ?? item.unitPrice ?? 0) * qty)));
+      });
+      const revenueBaseTotal = revenueBases.reduce((sum, value) => sum + value, 0);
+      let allocatedRevenue = 0;
+
+      tx.items.forEach((item: any, itemIndex: number) => {
         const pId = item.productId || item.id || `unknown-${item.productName || item.name}`;
         const pSku = item.sku || '';
         const pName = item.productName || item.name || 'Produk Tanpa Nama';
         const qty = Number(item.quantity || 1);
-        const subtotal = Number(item.subtotal ?? (Number(item.price || 0) * qty));
+        const subtotal = itemIndex === tx.items.length - 1
+          ? transactionRevenue - allocatedRevenue
+          : revenueBaseTotal > 0
+            ? transactionRevenue * (revenueBases[itemIndex] / revenueBaseTotal)
+            : transactionRevenue / tx.items.length;
+        allocatedRevenue += subtotal;
         
         // Find product definition to get current HPP & Category if not in item
-        const pDef = productMap.get(pId) || (pSku ? productMap.get(pSku) : undefined);
+        const pDef = productMap.get(pId) || (pSku ? productMap.get(pSku) : undefined) || productMap.get(pName.trim().toLowerCase());
         const category = (item.category || pDef?.category || 'Hijab').trim();
         const itemHppUnit = Number(item.hpp ?? (pDef?.hpp ?? 0));
         const totalItemHpp = itemHppUnit * qty;
@@ -538,7 +550,7 @@ export const ProfitLossView: React.FC<ProfitLossViewProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <div className="p-2 rounded-xl bg-amber-100 text-amber-800">
-                  <Sparkles className="w-4 h-4" />
+                  
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">

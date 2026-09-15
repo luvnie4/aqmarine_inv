@@ -131,6 +131,9 @@ export interface SaleTransaction {
   bazaarName?: string;
   operator?: string;
   cashier?: string;
+  productDetails?: string;
+  estimatedGrossProfit?: number;
+  migrationSource?: string;
   notes?: string;
   createdAt?: string;
 }
@@ -185,6 +188,9 @@ export interface StockAdjustment {
   operator: string;
   notes?: string;
   createdAt?: string;
+  previousInitialStock?: number;
+  previousIncomingStock?: number;
+  previousLastOpnameAt?: string;
 }
 
 export interface StockRestock {
@@ -206,6 +212,8 @@ export interface StockRestock {
   operator?: string;
   notes?: string;
   createdAt?: string;
+  previousHpp?: number;
+  updateProductHpp?: boolean;
 }
 
-export type ActiveTab = 'dashboard' | 'inventory' | 'restocks' | 'sales' | 'pos' | 'transfers' | 'adjustments' | 'reports' | 'profit_loss';
+export type ActiveTab = 'dashboard' | 'inventory' | 'sales' | 'pos' | 'restocks' | 'transfers' | 'adjustments' | 'reports' | 'profit_loss';
