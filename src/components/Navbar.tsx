@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingBag, ArrowLeftRight, ClipboardList, ChartNoAxesCombined, Calculator, Plus, RefreshCw, LogOut, Users, CloudCheck, CloudOff } from './UiIcons';
+import { LayoutDashboard, Package, ShoppingBag, ArrowLeftRight, ClipboardList, ChartNoAxesCombined, Calculator, CalendarDays, Plus, RefreshCw, LogOut, Users, CloudCheck, CloudOff } from './UiIcons';
 import { BrandLogo } from './BrandLogo';
 import type { ActiveTab, Product, UserAccount } from '../types';
 interface Props {
@@ -16,6 +16,7 @@ export function Navbar(p: Props) {
   { id: 'restocks', label: 'Barang masuk', icon: Package },
   { id: 'transfers', label: 'Mutasi stok', icon: ArrowLeftRight },
   { id: 'adjustments', label: 'Stok opname', icon: ClipboardList },
+  { id: 'calendar', label: 'Kalender aktivitas', icon: CalendarDays },
   { id: 'reports', label: 'Laporan', icon: ChartNoAxesCombined },
   ...(owner ? [{ id: 'profit_loss', label: 'Laba & rugi', icon: Calculator }] : []),
  ];

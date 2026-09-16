@@ -7,6 +7,7 @@ export const ArrowLeftRight = ({size=20,className=''}:Props) => <i aria-hidden="
 export const ClipboardList = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-clipboard-list '+className} style={{fontSize:size,width:size,height:size}}/>;
 export const ChartNoAxesCombined = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-chart-histogram '+className} style={{fontSize:size,width:size,height:size}}/>;
 export const Calculator = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-calculator '+className} style={{fontSize:size,width:size,height:size}}/>;
+export const CalendarDays = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-calendar '+className} style={{fontSize:size,width:size,height:size}}/>;
 export const Plus = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-plus '+className} style={{fontSize:size,width:size,height:size}}/>;
 export const RefreshCw = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-refresh '+className} style={{fontSize:size,width:size,height:size}}/>;
 export const LogOut = ({size=20,className=''}:Props) => <i aria-hidden="true" className={'aq-icon fi-rr-sign-out-alt '+className} style={{fontSize:size,width:size,height:size}}/>;

@@ -28,6 +28,7 @@ import { TransfersView } from './components/TransfersView';
 import { RestocksView } from './components/RestocksView';
 import { AdjustmentsView } from './components/AdjustmentsView';
 import { ReportsView } from './components/ReportsView';
+import { ActivityCalendarView } from './components/ActivityCalendarView';
 import { ProfitLossView } from './components/ProfitLossView';
 import { ProductFormModal } from './components/ProductFormModal';
 import { TransferStockModal } from './components/TransferStockModal';
@@ -463,6 +464,16 @@ export function App() {
             }}
             onEdit={(record) => setEditingMovement({kind:'adjustments',record})}
             onDelete={(record) => void handleDeleteMovement('adjustments', record)}
+          />
+        )}
+
+        {activeTab === 'calendar' && (
+          <ActivityCalendarView
+            products={products}
+            transactions={transactions}
+            restocks={restocks}
+            transfers={transfers}
+            adjustments={adjustments}
           />
         )}
 

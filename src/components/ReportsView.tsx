@@ -1624,6 +1624,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   );
                 })}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-[#9D6C72]/30 bg-rose-50/70">
+                  <td colSpan={5} className="py-3.5 px-4 text-right">
+                    <div className="text-xs font-black uppercase tracking-wide text-slate-700">Total hasil filter</div>
+                    <div className="text-[10px] font-semibold text-slate-500">
+                      {sortedTransactions.length} transaksi · {totalItemsSold} item
+                      {skuFilter !== 'all' ? ` · SKU ${skuFilter}` : ''}
+                    </div>
+                  </td>
+                  <td className="py-3.5 px-4 text-right">
+                    <div className="text-base font-black text-[#7C5056]">{formatRupiah(totalOmset)}</div>
+                  </td>
+                  <td className="py-3.5 px-4" />
+                </tr>
+              </tfoot>
             </table>
           )}
         </div>

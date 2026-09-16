@@ -216,4 +216,4 @@ export interface StockRestock {
   updateProductHpp?: boolean;
 }
 
-export type ActiveTab = 'dashboard' | 'inventory' | 'sales' | 'pos' | 'restocks' | 'transfers' | 'adjustments' | 'reports' | 'profit_loss';
+export type ActiveTab = 'dashboard' | 'inventory' | 'sales' | 'pos' | 'restocks' | 'transfers' | 'adjustments' | 'calendar' | 'reports' | 'profit_loss';
