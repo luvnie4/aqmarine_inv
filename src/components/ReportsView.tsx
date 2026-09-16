@@ -33,6 +33,7 @@ import { formatRupiah, formatDateTime, exportToCSV, toDateInputString, toTimeInp
 import { getOutlets } from '../utils/outletStorage';
 import { getBazaarEvents } from '../utils/bazaarStorage';
 import { EditTransactionModal } from './EditTransactionModal';
+import { transactionChannelType } from '../lib/salesRouting';
 
 interface ReportsViewProps {
   transactions: SaleTransaction[];
@@ -235,7 +236,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       // Channel filter
       if (channelFilter !== 'all') {
-        const type = tx.salesChannelType || 'toko';
+        const type = transactionChannelType(tx);
         if (type !== channelFilter) {
           return false;
         }
@@ -360,7 +361,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     };
 
     baseTimeframeTransactions.forEach((tx) => {
-      const type = (tx.salesChannelType as keyof typeof map) || 'toko';
+      const type = transactionChannelType(tx) as keyof typeof map;
       if (map[type]) {
         map[type].count += 1;
         map[type].total += (tx.total || 0);
@@ -495,7 +496,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         if (cat.toLowerCase() === 'mukena') mukenaCount += (item.quantity || 1);
       });
 
-      const channelType = tx.salesChannelType || 'toko';
+      const channelType = transactionChannelType(tx);
       const channelLabel = 
         channelType === 'toko' ? 'Toko Offline' :
         channelType === 'bazaar' ? 'Bazaar & Event' :
@@ -551,7 +552,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   const getChannelBadge = (tx: SaleTransaction) => {
-    const type = tx.salesChannelType || 'toko';
+    const type = transactionChannelType(tx);
     if (type === 'bazaar') {
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-amber-100/90 text-amber-900 border border-amber-300/80 shadow-2xs">

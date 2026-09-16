@@ -26,6 +26,7 @@ import { SaleTransaction, Product, PaymentMethod } from '../types';
 import { formatRupiah, toDateInputString, toTimeInputString } from '../utils/formatters';
 import { getOutlets, getChannels } from '../utils/outletStorage';
 import { getBazaarEvents } from '../utils/bazaarStorage';
+import { mainOutlet, transactionChannelType } from '../lib/salesRouting';
 
 interface EditTransactionModalProps {
   isOpen: boolean;
@@ -80,14 +81,15 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
 
   // Channel & Location
   const [channelType, setChannelType] = useState<string>(
-    transaction.salesChannelType || 
-    (transaction.bazaarId ? 'bazaar' : 'toko')
+    transactionChannelType(transaction)
   );
   const [customChannelName, setCustomChannelName] = useState<string>(
     (transaction as any).customChannelName || transaction.salesChannelName || ''
   );
   const [selectedOutletId, setSelectedOutletId] = useState<string>(
-    transaction.stockDeductedOutletId || transaction.outletId || (outlets[0]?.id || '')
+    transactionChannelType(transaction) === 'bazaar'
+      ? (mainOutlet(outlets)?.id || 'outlet-main')
+      : (transaction.stockDeductedOutletId || transaction.outletId || (outlets[0]?.id || ''))
   );
   const [selectedBazaarId, setSelectedBazaarId] = useState<string>(transaction.bazaarId || (bazaars[0]?.id || ''));
 
@@ -417,6 +419,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
       }
 
       const outlet = outlets.find((o) => o.id === selectedOutletId);
+      const stockOutlet = channelType === 'bazaar' ? mainOutlet(outlets) : outlet;
       const bazaar = bazaars.find((b) => b.id === selectedBazaarId);
 
       let chName = 'Toko Offline';
@@ -502,10 +505,10 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
         salesChannelType: channelType,
         salesChannelName: chName,
         channelName: chName,
-        outletId: outlet?.id || transaction.outletId || (outlets[0]?.id || 'outlet-main'),
-        outletName: outlet?.name || transaction.outletName || 'Toko Utama',
-        stockDeductedOutletId: outlet?.id || transaction.stockDeductedOutletId || (outlets[0]?.id || 'outlet-main'),
-        stockDeductedLocationName: outlet?.name || transaction.stockDeductedLocationName || 'Toko Utama',
+        outletId: stockOutlet?.id || 'outlet-main',
+        outletName: stockOutlet?.name || 'Toko Utama AQMARINE',
+        stockDeductedOutletId: stockOutlet?.id || 'outlet-main',
+        stockDeductedLocationName: stockOutlet?.name || 'Toko Utama AQMARINE',
         bazaarId: channelType === 'bazaar' ? (bazaar?.id || selectedBazaarId) : undefined,
         bazaarName: channelType === 'bazaar' ? (bazaar?.name || undefined) : undefined,
       };
@@ -761,6 +764,9 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                       </option>
                     ))}
                   </select>
+                  <div className="mt-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-900">
+                    Stok selalu diambil dari {mainOutlet(outlets)?.name || 'Toko Utama AQMARINE'}.
+                  </div>
                 </div>
               ) : channelType === 'custom' ? (
                 <div>

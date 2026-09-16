@@ -1,4 +1,5 @@
 import type { Product, SaleTransaction, StockTransfer, StockAdjustment, StockRestock } from '../types';
+import { stockOutletIdForSale } from './salesRouting';
 
 export function stockAt(product: Product, location: string): number {
   if (location === 'gudang') return product.stockGudang || 0;
@@ -25,8 +26,8 @@ export function applySale(product: Product, next: SaleTransaction, previous?: Sa
   let result = product;
   const oldQty = saleQuantities(previous).get(product.id) || 0;
   const newQty = saleQuantities(next).get(product.id) || 0;
-  const oldLoc = previous?.stockDeductedOutletId || previous?.outletId || 'outlet-main';
-  const newLoc = next.stockDeductedOutletId || next.outletId || 'outlet-main';
+  const oldLoc = previous ? stockOutletIdForSale(previous) : 'outlet-main';
+  const newLoc = stockOutletIdForSale(next);
   if (oldQty) result = setStock(result, oldLoc, stockAt(result, oldLoc) + oldQty);
   if (newQty) result = setStock(result, newLoc, stockAt(result, newLoc) - newQty);
   return result;

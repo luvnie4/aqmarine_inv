@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { applySale, applyMovement, revertMovement, stockAt, setStock } from '../src/lib/stock.ts';
+import { stockOutletIdForSale, transactionChannelType } from '../src/lib/salesRouting.ts';
 import type { Product, SaleTransaction, StockTransfer, StockAdjustment, StockRestock } from '../src/types';
 const product: Product = { id:'p1', sku:'AQ1', barcode:'1', name:'Hijab', category:'Hijab', hpp:50, priceRetail:100, priceGrosir:90, stockToko:10, stockGudang:5, outletStocks:{'outlet-main':10}, minStockAlert:2, unit:'pcs' };
 const sale = (qty:number, outlet='outlet-main'):SaleTransaction => ({id:'tx1',transactionNumber:'TX1',date:'2026-09-10T00:00:00Z',items:[{productId:'p1',quantity:qty}],subtotal:qty*100,total:qty*100,paymentMethod:'cash',outletId:outlet});
@@ -10,6 +11,8 @@ describe('Konsistensi stok',()=>{
  it('menggabungkan baris produk yang sama',()=>{const tx=sale(3);tx.items.push({productId:'p1',quantity:2});assert.equal(applySale(product,tx).stockToko,5)});
  it('edit penjualan mengembalikan stok lama sebelum memotong jumlah baru',()=>{const after=applySale(product,sale(3));assert.equal(applySale(after,sale(5),sale(3)).stockToko,5)});
  it('edit pindah outlet memulihkan outlet asal',()=>{const before={...product,stockToko:17,outletStocks:{'outlet-main':7,'outlet-2':10}};const result=applySale(before,sale(4,'outlet-2'),sale(3));assert.equal(stockAt(result,'outlet-main'),10);assert.equal(stockAt(result,'outlet-2'),6)});
+ it('bazaar selalu mengambil stok utama meski outlet cabang terpilih',()=>{const before={...product,stockToko:17,outletStocks:{'outlet-main':7,'outlet-2':10}};const tx={...sale(2,'outlet-2'),salesChannelType:'bazaar',bazaarName:'Bazaar Botanical Mall',stockDeductedOutletId:'outlet-2'};const result=applySale(before,tx);assert.equal(stockAt(result,'outlet-main'),5);assert.equal(stockAt(result,'outlet-2'),10)});
+ it('mengenali transaksi bazaar lama dan mengarahkannya ke toko utama',()=>{const legacy={salesChannelName:'Bazaar & Event',outletName:'Bazaar Botanical Mall'};assert.equal(transactionChannelType(legacy),'bazaar');assert.equal(stockOutletIdForSale(legacy),'outlet-main')});
  it('mutasi menjaga total stok toko dan gudang',()=>{const result=applyMovement(product,'transfers',{productId:'p1',quantity:3,fromLocation:'gudang',toLocation:'outlet-main'} as StockTransfer);assert.equal(result.stockGudang,2);assert.equal(result.stockToko,13)});
  it('menolak mutasi ke lokasi sama',()=>assert.throws(()=>applyMovement(product,'transfers',{quantity:2,fromLocation:'gudang',toLocation:'gudang'} as StockTransfer)));
  it('menolak opname berdasarkan stok yang sudah berubah',()=>assert.throws(()=>applyMovement(product,'adjustments',{location:'outlet-main',previousStock:9,actualStock:8} as StockAdjustment)));

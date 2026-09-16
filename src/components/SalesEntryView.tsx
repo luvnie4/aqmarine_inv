@@ -53,6 +53,7 @@ import { ManageChannelsModal } from './ManageChannelsModal';
 import { ManageBazaarsModal } from './ManageBazaarsModal';
 import { ProductPhotoGalleryModal } from './ProductPhotoGalleryModal';
 import { getProductImages, getProductMainImage } from '../data/productPhotoPresets';
+import { mainOutlet } from '../lib/salesRouting';
 
 interface SalesEntryViewProps {
   products: Product[];
@@ -233,6 +234,11 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
     };
   }, [outlets, selectedOutletId]);
 
+  // Bazaar is a sales channel, never a stock location. Its stock always comes from the main outlet.
+  const stockSourceOutlet = useMemo(() => {
+    return activeChannelType === 'bazaar' ? (mainOutlet(outlets) || activeOutlet) : activeOutlet;
+  }, [activeChannelType, activeOutlet, outlets]);
+
   // Active Bazaar object
   const activeBazaar = useMemo(() => {
     return bazaars.find(b => b.id === selectedBazaarId) || bazaars.find(b => b.isActive) || bazaars[0] || null;
@@ -251,8 +257,8 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
 
   // Helper to get available stock of a product based on active store outlet
   const getProductStock = (product: Product): number => {
-    if (product.outletStocks && selectedOutletId && product.outletStocks[selectedOutletId] !== undefined) {
-      return product.outletStocks[selectedOutletId];
+    if (product.outletStocks && product.outletStocks[stockSourceOutlet.id] !== undefined) {
+      return product.outletStocks[stockSourceOutlet.id];
     }
     return product.stockToko || 0;
   };
@@ -278,7 +284,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
   // 1-Click Add to List
   const handleAddToCart = (product: Product) => {
     const availableStock = getProductStock(product);
-    const locationLabel = activeOutlet?.name || 'Toko Utama';
+    const locationLabel = stockSourceOutlet?.name || 'Toko Utama';
 
     if (availableStock <= 0) {
       showWarning(`Stok produk "${product.name}" di ${locationLabel} kosong.`);
@@ -345,7 +351,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
         .map((item) => {
           if (item.product.id === productId) {
             const availableStock = getProductStock(item.product);
-            const locationLabel = activeOutlet?.name || 'Toko Utama';
+            const locationLabel = stockSourceOutlet?.name || 'Toko Utama';
             const newQty = item.quantity + delta;
 
             if (newQty > availableStock) {
@@ -401,7 +407,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
       return;
     }
 
-    const locationName = activeOutlet.name;
+    const locationName = stockSourceOutlet.name;
     const customChObj = channels.find(c => c.id === selectedCustomChannelId);
 
     // Calculate chosen transaction date & time
@@ -445,11 +451,12 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
       // Sales Channel & Multi-outlet attributes
       salesChannelType: activeChannelType,
       salesChannelName: getChannelDisplayName(),
-      outletId: activeOutlet.id,
-      outletName: activeOutlet.name,
+      outletId: stockSourceOutlet.id,
+      outletName: stockSourceOutlet.name,
+      bazaarId: activeChannelType === 'bazaar' ? activeBazaar?.id : undefined,
       bazaarName: activeChannelType === 'bazaar' ? (bazaarName.trim() || 'Bazaar AQMARINE') : undefined,
       customChannelName: activeChannelType === 'custom' ? (customChObj?.name || 'Saluran Kustom') : undefined,
-      stockDeductedOutletId: activeOutlet.id,
+      stockDeductedOutletId: stockSourceOutlet.id,
       stockDeductedLocationName: locationName,
     };
 
@@ -767,17 +774,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
 
                 <div className="flex items-center gap-2 text-xs">
                   <span className="font-semibold text-slate-600">Ambil dari Toko:</span>
-                  <select
-                    value={selectedOutletId}
-                    onChange={(e) => setSelectedOutletId(e.target.value)}
-                    className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-[11px] font-bold text-slate-800 focus:outline-none"
-                  >
-                    {outlets.map((o) => (
-                      <option key={`bz-out-${o.id}`} value={o.id}>
-                        {o.name}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] font-black text-emerald-900">
+                    {stockSourceOutlet.name}
+                  </span>
                 </div>
               </div>
 
@@ -929,7 +928,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-slate-700">Pilih Produk:</span>
                 <span className="text-[11px] px-2 py-0.5 bg-slate-100 text-slate-600 font-semibold rounded-md">
-                  Sumber Stok: <strong className="text-slate-900">{activeOutlet.name}</strong>
+                  Sumber Stok: <strong className="text-slate-900">{stockSourceOutlet.name}</strong>
                 </span>
               </div>
 
