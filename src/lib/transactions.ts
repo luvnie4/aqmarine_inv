@@ -1,5 +1,5 @@
 import { commitDocumentsAtomically, fetchDocument } from './supabase';
-import { applySale, applyMovement, revertMovement, saleQuantities, stockAt } from './stock';
+import { adjustmentReasonForDifference, applySale, applyMovement, revertMovement, saleQuantities, stockAt } from './stock';
 import type { Product, SaleTransaction, StockTransfer, StockAdjustment, StockRestock } from '../types';
 
 export async function commitSale(next: SaleTransaction, edit = false, previousForStock?: SaleTransaction) {
@@ -49,7 +49,8 @@ function enrichMovementRecord(kind: 'transfers' | 'adjustments' | 'restocks', re
     const location = adjustment.locationId || adjustment.location;
     const previousStock = stockAt(product, location);
     const actualStock = Number(adjustment.actualStock ?? adjustment.newStock);
-    return { ...adjustment, previousStock, actualStock, newStock:actualStock, difference:actualStock-previousStock, previousInitialStock:product.initialStock, previousIncomingStock:product.incomingStock, previousLastOpnameAt:product.lastOpnameAt };
+    const difference = actualStock - previousStock;
+    return { ...adjustment, previousStock, actualStock, newStock:actualStock, difference, reason:adjustmentReasonForDifference(adjustment.reason, difference), previousInitialStock:product.initialStock, previousIncomingStock:product.incomingStock, previousLastOpnameAt:product.lastOpnameAt };
   }
   if (kind === 'restocks') return { ...(record as StockRestock), previousHpp:product.hpp, updateProductHpp:updateHpp };
   return record;

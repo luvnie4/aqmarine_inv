@@ -71,7 +71,7 @@ export const AdjustmentsView: React.FC<AdjustmentsViewProps> = ({
       a.previousStock,
       a.newStock,
       a.difference,
-      a.reason,
+      getReasonLabel(a.reason),
       a.operator,
       a.notes || '-'
     ]);
@@ -81,6 +81,7 @@ export const AdjustmentsView: React.FC<AdjustmentsViewProps> = ({
 
   const getReasonLabel = (reason: string) => {
     switch (reason) {
+      case 'opname_sesuai': return 'Opname Sesuai / Tidak Ada Selisih';
       case 'rusak': return 'Cacat / Rusak';
       case 'hilang': return 'Hilang';
       case 'koreksi_fisik': return 'Koreksi Hitung';

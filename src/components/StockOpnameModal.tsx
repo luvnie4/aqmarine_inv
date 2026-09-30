@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Product, StockAdjustment, AdjustmentReason, LocationType, StoreOutlet } from '../types';
 import { getOutlets } from '../utils/outletStorage';
+import { adjustmentReasonForDifference } from '../lib/stock';
 
 interface StockOpnameModalProps {
   isOpen: boolean;
@@ -105,6 +106,7 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
   const currentSystemStock = getStockAtLocation(currentProduct, locationType);
   const numActual = typeof actualStock === 'number' ? actualStock : 0;
   const difference = numActual - currentSystemStock;
+  const storedReason = adjustmentReasonForDifference(reason, difference);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -121,7 +123,7 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
       previousStock: currentSystemStock,
       newStock: numActual,
       difference,
-      reason,
+      reason: storedReason,
       notes: notes.trim() || undefined,
       operator: operator.trim() || 'Staff',
     };
@@ -257,16 +259,23 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
               Alasan / Kategori Penyesuaian:
             </label>
             <select
-              value={reason}
+              value={storedReason}
               onChange={(e) => setReason(e.target.value as AdjustmentReason)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800"
+              disabled={difference === 0}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 disabled:bg-emerald-50 disabled:text-emerald-800 disabled:border-emerald-200"
             >
+              <option value="opname_sesuai">Opname Sesuai / Tidak Ada Selisih</option>
               <option value="koreksi_fisik">Koreksi Fisik (Salah Hitung / Selisih Rutin)</option>
               <option value="rusak">Barang Rusak / Cacat Bahan / Noda</option>
               <option value="hilang">Barang Hilang / Selisih Tak Ditemukan</option>
               <option value="sample_display">Dijadikan Sample Pajangan / Manekin</option>
               <option value="retur">Retur Konsumen / Kembali ke Stok</option>
             </select>
+            {difference === 0 && (
+              <p className="text-[10px] text-emerald-700 font-semibold">
+                Dipilih otomatis karena stok fisik sama dengan stok sistem.
+              </p>
+            )}
           </div>
 
           {/* Notes & Operator */}
@@ -316,4 +325,3 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
     </div>
   );
 };
-

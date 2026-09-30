@@ -161,11 +161,15 @@ export interface StockTransfer {
 }
 
 export type AdjustmentReason = 
+  | 'opname_sesuai'
+  | 'koreksi_fisik'
   | 'selisih_fisik' 
   | 'rusak' 
   | 'hilang' 
+  | 'retur'
   | 'retur_supplier' 
   | 'koreksi_input' 
+  | 'sample_display'
   | 'sampel_display' 
   | 'lainnya';
 

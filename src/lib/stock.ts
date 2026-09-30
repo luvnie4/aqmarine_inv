@@ -1,4 +1,4 @@
-import type { Product, SaleTransaction, StockTransfer, StockAdjustment, StockRestock } from '../types';
+import type { AdjustmentReason, Product, SaleTransaction, StockTransfer, StockAdjustment, StockRestock } from '../types';
 import { stockOutletIdForSale } from './salesRouting';
 
 export function stockAt(product: Product, location: string): number {
@@ -21,6 +21,11 @@ export function saleQuantities(tx?: SaleTransaction): Map<string, number> {
     result.set(id, (result.get(id) || 0) + qty);
   }
   return result;
+}
+export function adjustmentReasonForDifference(reason: AdjustmentReason | string | undefined, difference: number): AdjustmentReason {
+  if (difference === 0) return 'opname_sesuai';
+  if (!reason || reason === 'opname_sesuai') return 'koreksi_fisik';
+  return reason as AdjustmentReason;
 }
 export function applySale(product: Product, next: SaleTransaction, previous?: SaleTransaction): Product {
   let result = product;
