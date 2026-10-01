@@ -58,7 +58,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('all');
   const [stockStatusFilter, setStockStatusFilter] = useState<'all' | 'low_toko' | 'low_gudang' | 'out_of_stock'>('all');
   const [sortBy, setSortBy] = useState<'name' | 'stock_asc' | 'stock_desc' | 'price_desc' | 'price_asc'>('name');
-  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('cards');
   const [currentMonthKey, setCurrentMonthKey] = useState(() => jakartaMonthKey());
 
   useEffect(() => {
@@ -1101,3 +1101,4 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     </div>
   );
 };
+
