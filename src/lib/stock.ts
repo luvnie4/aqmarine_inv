@@ -1,5 +1,19 @@
 import type { AdjustmentReason, Product, SaleTransaction, StockTransfer, StockAdjustment, StockRestock } from '../types';
 import { stockOutletIdForSale } from './salesRouting';
+import { jakartaMonthKey } from '../utils/formatters';
+
+export function productSalesInMonth(transactions: SaleTransaction[], productId: string, monthKey = jakartaMonthKey()): number {
+  let quantity = 0;
+  for (const tx of transactions) {
+    if (jakartaMonthKey(tx.date) !== monthKey) continue;
+    for (const item of tx.items || []) {
+      const itemProductId = item.product?.id || item.productId;
+      const itemQuantity = Number(item.quantity || 0);
+      if (itemProductId === productId && Number.isFinite(itemQuantity) && itemQuantity > 0) quantity += itemQuantity;
+    }
+  }
+  return quantity;
+}
 
 export function stockAt(product: Product, location: string): number {
   if (location === 'gudang') return product.stockGudang || 0;

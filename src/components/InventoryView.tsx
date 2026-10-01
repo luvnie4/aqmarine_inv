@@ -21,7 +21,8 @@ import {
   Camera
 } from 'lucide-react';
 import { Product, StoreOutlet, SaleTransaction } from '../types';
-import { formatRupiah, formatNumber, exportToCSV } from '../utils/formatters';
+import { formatRupiah, formatNumber, exportToCSV, jakartaMonthKey } from '../utils/formatters';
+import { productSalesInMonth } from '../lib/stock';
 import { ProductPhotoGalleryModal } from './ProductPhotoGalleryModal';
 import { ImportProductsModal } from './ImportProductsModal';
 import { getProductImages, getProductMainImage } from '../data/productPhotoPresets';
@@ -58,6 +59,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [stockStatusFilter, setStockStatusFilter] = useState<'all' | 'low_toko' | 'low_gudang' | 'out_of_stock'>('all');
   const [sortBy, setSortBy] = useState<'name' | 'stock_asc' | 'stock_desc' | 'price_desc' | 'price_asc'>('name');
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+  const [currentMonthKey, setCurrentMonthKey] = useState(() => jakartaMonthKey());
+
+  useEffect(() => {
+    const refreshMonth = () => setCurrentMonthKey(jakartaMonthKey());
+    const timer = window.setInterval(refreshMonth, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
@@ -147,15 +155,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     const inStock = p.incomingStock || 0;
     const currentStock = p.stockToko;
 
-    // Calculate actual units sold in transactions (koreksi periodik tidak menghapus riwayat penjualan)
-    let txSoldCount = 0;
+    // Riwayat penuh hanya dipakai untuk membantu produk lama yang belum mempunyai baseline.
+    // Angka Terjual yang tampil khusus bulan berjalan menurut waktu Jakarta.
+    let lifetimeSoldCount = 0;
     if (transactions && transactions.length > 0) {
       for (const tx of transactions) {
         if (Array.isArray(tx.items)) {
           for (const item of tx.items) {
             const prodId = item.product?.id || item.productId;
             if (prodId === p.id) {
-              txSoldCount += Number(item.quantity || 0);
+              const quantity = Number(item.quantity || 0);
+              if (Number.isFinite(quantity) && quantity > 0) lifetimeSoldCount += quantity;
             }
           }
         }
@@ -166,21 +176,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     let initStock: number;
     if (p.initialStock !== undefined) {
       initStock = p.initialStock;
-    } else if (txSoldCount > 0 || inStock > 0) {
-      initStock = Math.max(0, currentStock + txSoldCount - inStock);
+    } else if (lifetimeSoldCount > 0 || inStock > 0) {
+      initStock = Math.max(0, currentStock + lifetimeSoldCount - inStock);
     } else {
       initStock = currentStock;
     }
 
-    // Determine soldCount:
-    // Ground truth is recorded sales transactions. If transactions empty/legacy, derive from (init + in) - current.
-    let soldCount = txSoldCount;
-    if (soldCount === 0) {
-      const implicitDiff = (initStock + inStock) - currentStock;
-      if (implicitDiff > 0) {
-        soldCount = implicitDiff;
-      }
-    }
+    const soldCount = productSalesInMonth(transactions, p.id, currentMonthKey);
 
     return {
       initStock,
@@ -197,7 +199,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       map.set(p.id, getProductStockMetrics(p));
     }
     return map;
-  }, [filteredProducts, transactions]);
+  }, [filteredProducts, transactions, currentMonthKey]);
 
   // Aggregate stats
   const totalStockToko = filteredProducts.reduce((sum, p) => sum + p.stockToko, 0);
@@ -217,7 +219,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       'Kategori',
       'Stok Awal (pcs)',
       'Stok Masuk (pcs)',
-      'Terjual (pcs)',
+      'Terjual Bulan Berjalan (pcs)',
       'Sisa Stok Toko (pcs)',
       'Batas Min Alert',
       'HPP (Modal)',
@@ -331,13 +333,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         <div className="bg-rose-50/80 border border-rose-200/80 p-3 rounded-xl">
           <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-800 uppercase">
             <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
-            <span>Terjual</span>
+            <span>Terjual Bulan Ini</span>
           </div>
           <div className="flex items-baseline gap-1 mt-1">
             <span className="text-lg sm:text-xl font-black text-rose-950">{formatNumber(totalSold)}</span>
             <span className="text-[11px] text-rose-700 font-medium">pcs laku</span>
           </div>
-          <span className="text-[10px] text-rose-700 block mt-0.5">Total unit terjual</span>
+          <span className="text-[10px] text-rose-700 block mt-0.5">Periode {currentMonthKey}</span>
         </div>
 
         {/* Card 4: Sisa Stok Toko */}
@@ -579,7 +581,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   </th>
                   <th className="py-3.5 px-3 text-center bg-rose-50/50 text-rose-900 font-black">
                     <span className="inline-flex items-center gap-1">
-                      <TrendingDown className="w-3.5 h-3.5 text-rose-600" /> Terjual
+                      <TrendingDown className="w-3.5 h-3.5 text-rose-600" /> Terjual Bulan Ini
                     </span>
                   </th>
                   <th className="py-3.5 px-3 text-center bg-emerald-50/70 text-emerald-950 font-black">
@@ -717,7 +719,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                 {metrics.soldCount} {p.unit}
                               </span>
                               <span className="text-[9px] text-rose-600 font-semibold mt-0.5">
-                                Terjual
+                                Bulan ini
                               </span>
                             </div>
                           ) : (
@@ -1012,7 +1014,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               </span>
                             </div>
                             <div className="bg-rose-50/80 border border-rose-200/60 rounded-lg p-1.5 text-center">
-                              <span className="text-slate-400 block text-[9px] font-semibold">Terjual</span>
+                              <span className="text-slate-400 block text-[9px] font-semibold">Terjual bulan ini</span>
                               <span className="font-bold text-rose-800">
                                 {metrics.soldCount} {p.unit}
                               </span>
